@@ -7,3 +7,9 @@
 
 # Spec / docs scratch
 /_scratch/
+
+# Parser dev fixtures contain real PII (CAS PDFs include PAN, address,
+# nominee, mobile, etc.). Committed regression fixtures end in
+# `.anon.txt` and have those fields stripped; `.dev.*` files are
+# unsanitized local-only working copies.
+**/fixtures/*.dev.*

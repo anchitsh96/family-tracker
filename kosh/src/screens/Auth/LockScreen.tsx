@@ -11,6 +11,7 @@ import { openDb } from '@/storage/db';
 import {
   getPassphraseFromKeychain,
   isBiometricEnabled,
+  getLastActiveProfile,
 } from '@/crypto/keystore';
 import { useAuth } from '@/state/auth';
 import { useActiveProfile } from '@/state/activeProfile';
@@ -25,10 +26,12 @@ export function LockScreen() {
   const [attempts, setAttempts] = useState(0);
   const [busy, setBusy] = useState(false);
 
-  const finalizeUnlock = useCallback(() => {
+  const finalizeUnlock = useCallback(async () => {
     const profiles = ProfileRepository.list();
-    const def = profiles.find((p) => p.isDefault) ?? profiles[0];
-    if (def) setActive(def.id);
+    const lastId = await getLastActiveProfile();
+    const last = lastId ? profiles.find((p) => p.id === lastId) : undefined;
+    const target = last ?? profiles.find((p) => p.isDefault) ?? profiles[0];
+    if (target) setActive(target.id);
     setStatus('unlocked');
   }, [setStatus, setActive]);
 
@@ -143,11 +146,11 @@ export function LockScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center' },
-  header: { alignItems: 'center' },
-  brand: { ...typography.display, color: colors.textPrimary },
+  container: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.sm },
+  header: { alignItems: 'center', marginBottom: spacing.xl },
+  brand: { ...typography.display, color: colors.textPrimary, fontSize: 48 },
   sub: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm },
-  bioBtn: { alignItems: 'center', padding: spacing.md, marginTop: spacing.sm },
-  bioTxt: { color: colors.accent, fontSize: 16, fontWeight: '600' },
+  bioBtn: { alignItems: 'center', padding: spacing.md, marginTop: spacing.md },
+  bioTxt: { color: colors.accent, fontSize: 15, fontWeight: '600' },
   warn: { color: colors.warning, fontSize: 12, textAlign: 'center', marginTop: spacing.md },
 });

@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Bucket, BUCKET_LABELS, BUCKET_ICONS } from '@/types/account';
+import { Bucket, BUCKET_LABELS } from '@/types/account';
 import { Money } from '@/components/Money';
 import { colors } from '@/theme/colors';
-import { spacing, radius } from '@/theme/spacing';
+import { spacing } from '@/theme/spacing';
+import { typography } from '@/theme/typography';
 
 interface Slice {
   bucket: Bucket;
@@ -15,12 +16,16 @@ interface Props {
   total: number;
 }
 
+// Clean list-style allocation breakdown.
+// Each row: color dot · bucket label · spacer · amount · % share
+// A subtle stacked progress bar sits at the top so you still get a "shape"
+// without the visual weight of a donut chart.
 export function BucketBreakdown({ slices, total }: Props) {
   const sorted = [...slices].sort((a, b) => b.value - a.value).filter((s) => s.value > 0);
   if (sorted.length === 0 || total <= 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyTxt}>Add holdings to see your bucket breakdown</Text>
+        <Text style={styles.emptyTxt}>Add holdings to see your allocation</Text>
       </View>
     );
   }
@@ -28,22 +33,22 @@ export function BucketBreakdown({ slices, total }: Props) {
   return (
     <View>
       <View style={styles.bar}>
-        {sorted.map((s) => (
+        {sorted.map((s, idx) => (
           <View
             key={s.bucket}
             style={{
               flexBasis: `${(s.value / total) * 100}%`,
               backgroundColor: colors.bucket[s.bucket],
               height: '100%',
+              marginRight: idx === sorted.length - 1 ? 0 : 1,
             }}
           />
         ))}
       </View>
-      <View style={styles.legend}>
+      <View style={styles.list}>
         {sorted.map((s) => (
           <View key={s.bucket} style={styles.row}>
             <View style={[styles.dot, { backgroundColor: colors.bucket[s.bucket] }]} />
-            <Text style={styles.icon}>{BUCKET_ICONS[s.bucket]}</Text>
             <Text style={styles.label}>{BUCKET_LABELS[s.bucket]}</Text>
             <View style={{ flex: 1 }} />
             <Money value={s.value} compact style={styles.value} />
@@ -58,19 +63,31 @@ export function BucketBreakdown({ slices, total }: Props) {
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
-    height: 12,
-    borderRadius: radius.pill,
+    height: 6,
+    borderRadius: 3,
     overflow: 'hidden',
     backgroundColor: colors.surface,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
-  legend: { gap: spacing.sm },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  list: { gap: 0 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
   dot: { width: 10, height: 10, borderRadius: 5 },
-  icon: { fontSize: 16 },
-  label: { color: colors.textPrimary, fontSize: 14 },
-  value: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
-  pct: { color: colors.textSecondary, fontSize: 12, width: 56, textAlign: 'right' },
-  empty: { padding: spacing.lg, alignItems: 'center' },
-  emptyTxt: { color: colors.textMuted, fontSize: 14 },
+  label: { ...typography.body, color: colors.textPrimary },
+  value: { ...typography.bodyStrong, color: colors.textPrimary },
+  pct: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    width: 56,
+    textAlign: 'right',
+    marginLeft: spacing.sm,
+  },
+  empty: { paddingVertical: spacing.xxl, alignItems: 'center' },
+  emptyTxt: { ...typography.body, color: colors.textMuted },
 });

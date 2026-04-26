@@ -14,10 +14,26 @@ interface Props {
 export function RecoverySeedScreen({ onContinue }: Props) {
   const [mnemonic, setMnemonic] = useState<string>('');
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
 
   useEffect(() => {
     setMnemonic(generateMnemonic24());
   }, []);
+
+  // If the 24 words fit without overflow (tall phone, generous box), onScroll
+  // never fires. Treat "no scrolling needed" as already-at-bottom once both
+  // dimensions are known.
+  useEffect(() => {
+    if (
+      layoutHeight > 0 &&
+      contentHeight > 0 &&
+      contentHeight <= layoutHeight + 40 &&
+      !scrolledToBottom
+    ) {
+      setScrolledToBottom(true);
+    }
+  }, [layoutHeight, contentHeight, scrolledToBottom]);
 
   const words = useMemo(() => mnemonic.split(' ').filter(Boolean), [mnemonic]);
 
@@ -26,6 +42,10 @@ export function RecoverySeedScreen({ onContinue }: Props) {
     const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
     if (atBottom && !scrolledToBottom) setScrolledToBottom(true);
   };
+
+  const onContentSizeChange = (_w: number, h: number) => setContentHeight(h);
+  const onLayout = (e: { nativeEvent: { layout: { height: number } } }) =>
+    setLayoutHeight(e.nativeEvent.layout.height);
 
   return (
     <Screen scroll={false}>
@@ -40,6 +60,8 @@ export function RecoverySeedScreen({ onContinue }: Props) {
           style={styles.box}
           contentContainerStyle={styles.boxContent}
           onScroll={onScroll}
+          onContentSizeChange={onContentSizeChange}
+          onLayout={onLayout}
           scrollEventThrottle={64}
         >
           {words.map((w, i) => (

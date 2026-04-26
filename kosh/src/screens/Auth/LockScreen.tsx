@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import * as LocalAuth from 'expo-local-authentication';
 import { Screen } from '@/components/Screen';
@@ -26,6 +26,11 @@ export function LockScreen() {
   const [attempts, setAttempts] = useState(0);
   const [busy, setBusy] = useState(false);
 
+  // Re-entry guard for tryBiometric. Using a ref instead of `busy` state
+  // keeps the callback's identity stable across renders so we never end
+  // up re-firing biometric due to React re-render cascades.
+  const inFlight = useRef(false);
+
   const finalizeUnlock = useCallback(async () => {
     const profiles = ProfileRepository.list();
     const lastId = await getLastActiveProfile();
@@ -36,59 +41,53 @@ export function LockScreen() {
   }, [setStatus, setActive]);
 
   const tryBiometric = useCallback(async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
+    setError(null);
     try {
       const enabled = await isBiometricEnabled();
-      if (!enabled) {
-        setBusy(false);
-        return;
-      }
+      if (!enabled) return;
       const compat = await LocalAuth.hasHardwareAsync();
       const enrolled = await LocalAuth.isEnrolledAsync();
-      if (!compat || !enrolled) {
-        setBusy(false);
-        return;
-      }
+      if (!compat || !enrolled) return;
       const result = await LocalAuth.authenticateAsync({
         promptMessage: 'Unlock Kosh',
         cancelLabel: 'Use passphrase',
         disableDeviceFallback: false,
       });
-      if (!result.success) {
-        setBusy(false);
-        return;
-      }
+      if (!result.success) return; // User cancelled or failed — fall back to passphrase silently.
       const passphrase = await getPassphraseFromKeychain();
       if (!passphrase) {
-        setBusy(false);
         setError('Could not retrieve key. Use passphrase.');
         return;
       }
       try {
         openDb(passphrase);
-        finalizeUnlock();
+        await finalizeUnlock();
       } catch (e: any) {
         setError(e?.message === 'WRONG_PASSPHRASE' ? 'Stored key is invalid.' : 'Unlock failed.');
-      } finally {
-        setBusy(false);
       }
     } catch {
+      // Hardware/permission errors are non-fatal — passphrase still works.
+    } finally {
+      inFlight.current = false;
       setBusy(false);
     }
-  }, [busy, finalizeUnlock]);
+  }, [finalizeUnlock]);
 
+  // On mount, check if biometric is *available* — but DO NOT auto-trigger.
+  // Auto-triggering caused the prompt to repeat (any state change that
+  // recreated the callback re-fired the effect). Now Face ID only runs
+  // when the user explicitly taps "Use Face ID".
   useEffect(() => {
     (async () => {
       const compat = await LocalAuth.hasHardwareAsync();
       const enrolled = await LocalAuth.isEnrolledAsync();
       const enabled = await isBiometricEnabled();
       setBioAvailable(compat && enrolled && enabled);
-      if (compat && enrolled && enabled) {
-        tryBiometric();
-      }
     })();
-  }, [tryBiometric]);
+  }, []);
 
   const submit = () => {
     if (!pass) return;
@@ -130,8 +129,8 @@ export function LockScreen() {
           />
           <PrimaryButton title="Unlock" onPress={submit} loading={busy} disabled={!pass} />
           {bioAvailable ? (
-            <Pressable onPress={tryBiometric} style={styles.bioBtn}>
-              <Text style={styles.bioTxt}>Use Face ID</Text>
+            <Pressable onPress={tryBiometric} style={styles.bioBtn} disabled={busy}>
+              <Text style={[styles.bioTxt, busy && { opacity: 0.5 }]}>Use Face ID</Text>
             </Pressable>
           ) : null}
           {attempts >= 3 ? (

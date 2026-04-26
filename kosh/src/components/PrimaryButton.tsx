@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle } from 'react-native';
 import { colors } from '@/theme/colors';
 import { spacing, radius } from '@/theme/spacing';
+import { typography } from '@/theme/typography';
 
 interface Props {
   title: string;
@@ -12,23 +13,39 @@ interface Props {
   style?: ViewStyle;
 }
 
-export function PrimaryButton({ title, onPress, variant = 'primary', loading, disabled, style }: Props) {
-  const bg =
-    variant === 'primary' ? colors.accent : variant === 'danger' ? colors.negative : 'transparent';
-  const fg =
-    variant === 'primary' ? '#0E0F11' : variant === 'danger' ? '#fff' : colors.textPrimary;
-  const border = variant === 'ghost' ? colors.border : 'transparent';
-  const opacity = disabled || loading ? 0.5 : 1;
+// Pill button. Robinhood-style: large tap target, single color, no shadow.
+export function PrimaryButton({
+  title,
+  onPress,
+  variant = 'primary',
+  loading,
+  disabled,
+  style,
+}: Props) {
+  const isPrimary = variant === 'primary';
+  const isDanger = variant === 'danger';
+  const isGhost = variant === 'ghost';
+
+  const bg = isPrimary ? colors.accent : isDanger ? colors.negative : 'transparent';
+  const fg = isGhost ? colors.textPrimary : colors.accentInk;
+  const border = isGhost ? colors.border : 'transparent';
+  const borderWidth = isGhost ? 1 : 0;
 
   return (
     <Pressable
-      style={[
-        styles.btn,
-        { backgroundColor: bg, borderColor: border, borderWidth: variant === 'ghost' ? 1 : 0, opacity },
-        style,
-      ]}
       onPress={onPress}
       disabled={disabled || loading}
+      style={({ pressed }) => [
+        styles.btn,
+        {
+          backgroundColor: bg,
+          borderColor: border,
+          borderWidth,
+          opacity: disabled || loading ? 0.45 : pressed ? 0.85 : 1,
+          transform: pressed ? [{ scale: 0.985 }] : undefined,
+        },
+        style,
+      ]}
     >
       {loading ? (
         <ActivityIndicator color={fg} />
@@ -41,12 +58,12 @@ export function PrimaryButton({ title, onPress, variant = 'primary', loading, di
 
 const styles = StyleSheet.create({
   btn: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
+    paddingVertical: 16,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 56,
   },
-  txt: { fontSize: 16, fontWeight: '600' },
+  txt: { ...typography.bodyStrong, letterSpacing: 0.1 },
 });

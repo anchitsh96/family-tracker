@@ -1,7 +1,8 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useState } from 'react';
 import { TextInput as RNTextInput, TextInputProps, View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/theme/colors';
-import { spacing, radius } from '@/theme/spacing';
+import { spacing } from '@/theme/spacing';
+import { typography } from '@/theme/typography';
 
 interface Props extends TextInputProps {
   label?: string;
@@ -9,38 +10,69 @@ interface Props extends TextInputProps {
   hint?: string;
 }
 
-export const TextInput = forwardRef<RNTextInput, Props>(({ label, error, hint, style, ...rest }, ref) => {
-  return (
-    <View style={styles.wrap}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
-      <RNTextInput
-        ref={ref}
-        placeholderTextColor={colors.textMuted}
-        style={[styles.input, error ? styles.inputError : null, style]}
-        {...rest}
-      />
-      {error ? <Text style={styles.err}>{error}</Text> : hint ? <Text style={styles.hint}>{hint}</Text> : null}
-    </View>
-  );
-});
+// Underline-only input. Quiet by default; the underline tints to the accent
+// when focused, and to the error color when invalid.
+export const TextInput = forwardRef<RNTextInput, Props>(
+  ({ label, error, hint, style, onFocus, onBlur, ...rest }, ref) => {
+    const [focused, setFocused] = useState(false);
+    const onFocusInner = (e: any) => {
+      setFocused(true);
+      onFocus?.(e);
+    };
+    const onBlurInner = (e: any) => {
+      setFocused(false);
+      onBlur?.(e);
+    };
+    const underlineColor = error
+      ? colors.negative
+      : focused
+        ? colors.accent
+        : colors.border;
+    return (
+      <View style={styles.wrap}>
+        {label ? <Text style={styles.label}>{label}</Text> : null}
+        <View style={[styles.underline, { borderBottomColor: underlineColor }]}>
+          <RNTextInput
+            ref={ref}
+            placeholderTextColor={colors.textMuted}
+            selectionColor={colors.accent}
+            style={[styles.input, style]}
+            onFocus={onFocusInner}
+            onBlur={onBlurInner}
+            {...rest}
+          />
+        </View>
+        {error ? (
+          <Text style={styles.err}>{error}</Text>
+        ) : hint ? (
+          <Text style={styles.hint}>{hint}</Text>
+        ) : null}
+      </View>
+    );
+  }
+);
 
 TextInput.displayName = 'TextInput';
 
 const styles = StyleSheet.create({
-  wrap: { marginBottom: spacing.md },
-  label: { color: colors.textSecondary, fontSize: 13, marginBottom: spacing.xs, fontWeight: '500' },
+  wrap: { marginBottom: spacing.lg },
+  label: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  underline: {
+    borderBottomWidth: 1.5,
+    paddingHorizontal: 0,
+  },
   input: {
-    backgroundColor: colors.surface,
     color: colors.textPrimary,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
+    fontSize: 18,
+    fontWeight: '500',
     paddingVertical: 12,
-    fontSize: 16,
+    paddingHorizontal: 0,
     minHeight: 48,
   },
-  inputError: { borderColor: colors.negative },
-  err: { color: colors.negative, fontSize: 12, marginTop: spacing.xs },
-  hint: { color: colors.textMuted, fontSize: 12, marginTop: spacing.xs },
+  err: { ...typography.caption, color: colors.negative, marginTop: spacing.xs },
+  hint: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs },
 });

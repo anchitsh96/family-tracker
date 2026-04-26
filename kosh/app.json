@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0E0F11"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": false,
@@ -26,7 +26,7 @@
       "package": "com.anchit.kosh",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0E0F11"
+        "backgroundColor": "#FFFFFF"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -44,15 +44,7 @@
           "faceIDPermission": "Allow Kosh to use Face ID to unlock your portfolio."
         }
       ],
-      [
-        "@op-engineering/op-sqlite",
-        {
-          "sqlcipher": true
-        }
-      ],
-      "expo-document-picker",
-      "expo-file-system",
-      "react-native-gesture-handler"
+      "expo-document-picker"
     ]
   }
 }

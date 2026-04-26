@@ -11,6 +11,16 @@ const FdExtras = z.object({
   payoutType: z.enum(['cumulative', 'monthly', 'quarterly']),
 });
 
+const RdExtras = z.object({
+  kind: z.literal('rd'),
+  bankName: z.string(),
+  monthlyInstallment: z.number(),
+  interestRate: z.number(),
+  startDate: z.string(),
+  maturityDate: z.string(),
+  installmentsPaid: z.number().optional(),
+});
+
 const PpfExtras = z.object({
   kind: z.literal('ppf'),
   institution: z.string(),
@@ -83,6 +93,7 @@ const BondExtras = z.object({
 
 export const HoldingExtrasSchema = z.discriminatedUnion('kind', [
   FdExtras,
+  RdExtras,
   PpfExtras,
   RealEstateExtras,
   InsuranceExtras,

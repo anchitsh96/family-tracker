@@ -61,6 +61,52 @@ export function FdForm({ onSaved }: FormProps) {
   );
 }
 
+// RD --------------------------------------------------------------------------
+const RD_FIELDS: FormField[] = [
+  { key: 'bankName', label: 'Bank', placeholder: 'SBI', required: true, kind: 'text' },
+  { key: 'monthlyInstallment', label: 'Monthly installment (₹)', required: true, kind: 'currency' },
+  { key: 'rate', label: 'Interest rate (%)', required: true, kind: 'number' },
+  { key: 'startDate', label: 'Start date', required: true, kind: 'date', hint: 'YYYY-MM-DD' },
+  { key: 'maturityDate', label: 'Maturity date', required: true, kind: 'date', hint: 'YYYY-MM-DD' },
+  { key: 'installmentsPaid', label: 'Installments paid so far', kind: 'number', hint: 'Optional' },
+  { key: 'currentValue', label: 'Current accrued value (₹)', kind: 'currency', required: true, hint: 'Approximate value as of today' },
+];
+
+export function RdForm({ onSaved }: FormProps) {
+  const profileId = useProfileId();
+  const bump = useActiveProfile((s) => s.bump);
+  return (
+    <FormBuilder
+      title="Recurring Deposit"
+      subtitle="A fixed monthly deposit at a fixed rate."
+      fields={RD_FIELDS}
+      onSubmit={async (v) => {
+        const installmentsPaidRaw = v.installmentsPaid ? num(v.installmentsPaid) : undefined;
+        saveHolding({
+          profileId,
+          bucket: 'rd',
+          provider: v.bankName!,
+          accountNickname: `${v.bankName} RD`,
+          instrumentName: `${v.bankName} RD ${v.maturityDate}`,
+          valueInr: num(v.currentValue),
+          asOfDate: todayISO(),
+          extras: {
+            kind: 'rd',
+            bankName: v.bankName!,
+            monthlyInstallment: num(v.monthlyInstallment),
+            interestRate: num(v.rate),
+            startDate: v.startDate!,
+            maturityDate: v.maturityDate!,
+            installmentsPaid: installmentsPaidRaw,
+          },
+        });
+        bump();
+        onSaved();
+      }}
+    />
+  );
+}
+
 // PPF -------------------------------------------------------------------------
 const PPF_FIELDS: FormField[] = [
   { key: 'institution', label: 'Institution', defaultValue: 'SBI', required: true, kind: 'text' },
@@ -539,6 +585,7 @@ export function PmsForm({ onSaved }: FormProps) {
 export function pickFormFor(bucket: Bucket): React.ComponentType<FormProps> {
   switch (bucket) {
     case 'fd': return FdForm;
+    case 'rd': return RdForm;
     case 'ppf': return PpfForm;
     case 'real_estate': return RealEstateForm;
     case 'startup_equity': return AngelInvestmentForm;

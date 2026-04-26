@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { useAuth } from '@/state/auth';
 import { isFirstRun } from '@/crypto/keystore';
 import { OnboardingFlow } from '@/screens/Onboarding/OnboardingFlow';
 import { LockScreen } from '@/screens/Auth/LockScreen';
 import { TabNavigator } from './TabNavigator';
+import { SplashView } from '@/components/SplashView';
 import { colors } from '@/theme/colors';
 
 const navTheme = {
@@ -35,11 +35,7 @@ export function RootNavigator() {
   }, [status, setStatus]);
 
   if (status === 'unknown') {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator color={colors.accent} />
-      </View>
-    );
+    return <SplashView />;
   }
 
   return (
@@ -54,7 +50,3 @@ export function RootNavigator() {
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-});

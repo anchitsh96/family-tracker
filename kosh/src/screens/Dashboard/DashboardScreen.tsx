@@ -67,11 +67,9 @@ export function DashboardScreen() {
 
 const styles = StyleSheet.create({
   sectionLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...typography.h3,
+    color: colors.textPrimary,
     marginBottom: spacing.md,
-    marginTop: spacing.sm,
+    marginTop: spacing.lg,
   },
 });

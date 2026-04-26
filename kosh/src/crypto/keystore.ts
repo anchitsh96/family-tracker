@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 const K_PASSPHRASE = 'kosh.passphrase.v1';
 const K_SETUP_FLAG = 'kosh.setup_complete.v1';
 const K_BIOMETRIC_ENABLED = 'kosh.biometric_enabled.v1';
+const K_LAST_ACTIVE_PROFILE = 'kosh.last_active_profile.v1';
 
 const BIO_OPTIONS: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
@@ -29,6 +30,18 @@ export async function clearAllSecrets(): Promise<void> {
   await SecureStore.deleteItemAsync(K_PASSPHRASE, PLAIN_OPTIONS).catch(() => undefined);
   await SecureStore.deleteItemAsync(K_SETUP_FLAG, PLAIN_OPTIONS).catch(() => undefined);
   await SecureStore.deleteItemAsync(K_BIOMETRIC_ENABLED, PLAIN_OPTIONS).catch(() => undefined);
+  await SecureStore.deleteItemAsync(K_LAST_ACTIVE_PROFILE, PLAIN_OPTIONS).catch(() => undefined);
+}
+
+// Last-viewed profile id. Persisted across launches so opening the app
+// drops you back into whichever profile you were on. Falls back to the
+// `is_default` profile when this isn't set (first launch after onboarding).
+export async function setLastActiveProfile(id: string): Promise<void> {
+  await SecureStore.setItemAsync(K_LAST_ACTIVE_PROFILE, id, PLAIN_OPTIONS);
+}
+
+export async function getLastActiveProfile(): Promise<string | null> {
+  return SecureStore.getItemAsync(K_LAST_ACTIVE_PROFILE, PLAIN_OPTIONS);
 }
 
 export async function enableBiometricUnlock(passphrase: string): Promise<void> {

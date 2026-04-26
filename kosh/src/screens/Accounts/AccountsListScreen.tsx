@@ -5,7 +5,7 @@ import { Money } from '@/components/Money';
 import { useActiveProfile } from '@/state/activeProfile';
 import { AccountRepository } from '@/storage/repositories/AccountRepository';
 import { HoldingRepository } from '@/storage/repositories/HoldingRepository';
-import { Account, Bucket, BUCKET_ICONS, BUCKET_LABELS } from '@/types/account';
+import { Account, Bucket, BUCKET_LABELS } from '@/types/account';
 import { colors } from '@/theme/colors';
 import { spacing, radius } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -15,17 +15,21 @@ interface Props {
   onPickAccount: (id: string) => void;
 }
 
-interface BucketGroup {
-  bucket: Bucket;
+interface Row {
+  account: Account;
   total: number;
-  accounts: { account: Account; total: number; count: number }[];
+  count: number;
 }
 
+// Robinhood-style flat list. Each row is one account. The bucket is shown
+// as a small colored chip above the account name (think genre pill on a list
+// row). No duplicate value totals — the only number on a row is the
+// account's own value, right-aligned.
 export function AccountsListScreen({ onAdd, onPickAccount }: Props) {
   const activeId = useActiveProfile((s) => s.activeProfileId);
   const dataVersion = useActiveProfile((s) => s.dataVersion);
 
-  const groups = useMemo<BucketGroup[]>(() => {
+  const rows = useMemo<Row[]>(() => {
     if (!activeId) return [];
     const accounts = AccountRepository.listByProfile(activeId);
     const holdings = HoldingRepository.listByProfile(activeId);
@@ -36,15 +40,12 @@ export function AccountsListScreen({ onAdd, onPickAccount }: Props) {
       cur.count += 1;
       byAccount.set(h.accountId, cur);
     }
-    const byBucket = new Map<Bucket, BucketGroup>();
-    for (const a of accounts) {
-      const stats = byAccount.get(a.id) ?? { total: 0, count: 0 };
-      const g = byBucket.get(a.bucket) ?? { bucket: a.bucket, total: 0, accounts: [] };
-      g.total += stats.total;
-      g.accounts.push({ account: a, total: stats.total, count: stats.count });
-      byBucket.set(a.bucket, g);
-    }
-    return Array.from(byBucket.values()).sort((a, b) => b.total - a.total);
+    return accounts
+      .map((a) => {
+        const stats = byAccount.get(a.id) ?? { total: 0, count: 0 };
+        return { account: a, total: stats.total, count: stats.count };
+      })
+      .sort((a, b) => b.total - a.total);
   }, [activeId, dataVersion]);
 
   return (
@@ -55,39 +56,21 @@ export function AccountsListScreen({ onAdd, onPickAccount }: Props) {
           <Text style={styles.addTxt}>+ Add</Text>
         </Pressable>
       </View>
-      {groups.length === 0 ? (
+      {rows.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyH}>No holdings yet</Text>
-          <Text style={styles.emptyP}>Tap "+ Add" to enter your first one, or use the Documents tab to upload a Zerodha or Groww file.</Text>
+          <Text style={styles.emptyP}>
+            Tap "+ Add" to enter your first one, or use the Documents tab to upload a Zerodha or
+            Groww file.
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={groups}
-          keyExtractor={(g) => g.bucket}
+          data={rows}
+          keyExtractor={(r) => r.account.id}
           contentContainerStyle={{ paddingBottom: spacing.xxl }}
           renderItem={({ item }) => (
-            <View style={styles.group}>
-              <View style={styles.groupHeader}>
-                <Text style={styles.groupIcon}>{BUCKET_ICONS[item.bucket]}</Text>
-                <Text style={styles.groupTitle}>{BUCKET_LABELS[item.bucket]}</Text>
-                <View style={{ flex: 1 }} />
-                <Money value={item.total} compact style={styles.groupTotal} />
-              </View>
-              {item.accounts.map(({ account, total, count }) => (
-                <Pressable
-                  key={account.id}
-                  style={styles.row}
-                  onPress={() => onPickAccount(account.id)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowName}>{account.nickname}</Text>
-                    <Text style={styles.rowMeta}>{count} holding{count === 1 ? '' : 's'} · {account.provider}</Text>
-                  </View>
-                  <Money value={total} compact style={styles.rowVal} />
-                  <Text style={styles.chev}>›</Text>
-                </Pressable>
-              ))}
-            </View>
+            <AccountRow row={item} onPress={() => onPickAccount(item.account.id)} />
           )}
         />
       )}
@@ -95,32 +78,82 @@ export function AccountsListScreen({ onAdd, onPickAccount }: Props) {
   );
 }
 
+function AccountRow({ row, onPress }: { row: Row; onPress: () => void }) {
+  const bucketColor = colors.bucket[row.account.bucket as Bucket];
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface }]}
+    >
+      <View style={styles.rowLeft}>
+        <View style={[styles.bucketChip, { backgroundColor: `${bucketColor}22` }]}>
+          <View style={[styles.bucketDot, { backgroundColor: bucketColor }]} />
+          <Text style={[styles.bucketLabel, { color: bucketColor }]}>
+            {BUCKET_LABELS[row.account.bucket as Bucket]}
+          </Text>
+        </View>
+        <Text style={styles.name} numberOfLines={1}>
+          {row.account.nickname}
+        </Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {row.count} holding{row.count === 1 ? '' : 's'} · {row.account.provider}
+        </Text>
+      </View>
+      <View style={styles.rowRight}>
+        <Money value={row.total} compact style={styles.value} />
+        <Text style={styles.chev}>›</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
-  h1: { ...typography.h1, color: colors.textPrimary, flex: 1 },
-  addBtn: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.accent },
-  addTxt: { color: '#0E0F11', fontWeight: '700' },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xl },
+  h1: { ...typography.headline, color: colors.textPrimary, flex: 1 },
+  addBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+  },
+  addTxt: { color: colors.accentInk, fontWeight: '600', fontSize: 14, letterSpacing: 0.1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm },
-  emptyH: { ...typography.h2, color: colors.textPrimary },
+  emptyH: { ...typography.h1, color: colors.textPrimary },
   emptyP: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
-  group: { marginBottom: spacing.lg },
-  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm, paddingHorizontal: spacing.xs },
-  groupIcon: { fontSize: 18 },
-  groupTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  groupTotal: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.xs,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
     gap: spacing.md,
   },
-  rowName: { color: colors.textPrimary, fontSize: 16, fontWeight: '500' },
-  rowMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  rowVal: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  chev: { color: colors.textMuted, fontSize: 22, marginLeft: spacing.xs },
+  rowLeft: { flex: 1, gap: 4 },
+  bucketChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    marginBottom: 2,
+  },
+  bucketDot: { width: 6, height: 6, borderRadius: 3 },
+  bucketLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  name: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+  },
+  meta: { color: colors.textMuted, fontSize: 13 },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  value: { color: colors.textPrimary, fontSize: 17, fontWeight: '600' },
+  chev: { color: colors.textMuted, fontSize: 22 },
 });

@@ -1,0 +1,32 @@
+export const colors = {
+  bg: '#0E0F11',
+  surface: '#1A1C20',
+  surfaceAlt: '#22252B',
+  border: '#2C3036',
+  textPrimary: '#F5F6F8',
+  textSecondary: '#9AA0A6',
+  textMuted: '#6B7077',
+  accent: '#7DD3FC',
+  positive: '#4ADE80',
+  negative: '#F87171',
+  warning: '#FBBF24',
+
+  profileAnchit: '#7DD3FC',
+  profileDad: '#FCA5A5',
+
+  bucket: {
+    equity_india: '#4ADE80',
+    equity_pms: '#34D399',
+    equity_us: '#60A5FA',
+    mutual_funds: '#A78BFA',
+    bonds: '#FBBF24',
+    nps: '#F472B6',
+    ppf: '#FB923C',
+    epf: '#FCD34D',
+    fd: '#94A3B8',
+    startup_equity: '#F87171',
+    real_estate: '#22D3EE',
+    insurance: '#E879F9',
+    other: '#6B7280',
+  },
+} as const;

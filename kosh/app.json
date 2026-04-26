@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "Kosh",
+    "slug": "kosh",
+    "version": "1.0.0",
+    "scheme": "kosh",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E0F11"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.anchit.kosh",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Kosh uses Face ID to unlock your encrypted portfolio.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.anchit.kosh",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0E0F11"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow Kosh to access Face ID for unlocking your portfolio."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Kosh to use Face ID to unlock your portfolio."
+        }
+      ],
+      [
+        "@op-engineering/op-sqlite",
+        {
+          "sqlcipher": true
+        }
+      ],
+      "expo-document-picker",
+      "expo-file-system",
+      "react-native-gesture-handler"
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "kosh",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@op-engineering/op-sqlite": "^15.2.12",
+    "@react-navigation/bottom-tabs": "^7.15.10",
+    "@react-navigation/native": "^7.2.2",
+    "@react-navigation/native-stack": "^7.14.12",
+    "@shopify/react-native-skia": "^2.6.2",
+    "@types/papaparse": "^5.5.2",
+    "bip39": "^3.1.0",
+    "buffer": "^6.0.3",
+    "expo": "~54.0.33",
+    "expo-crypto": "~15.0.8",
+    "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~19.0.21",
+    "expo-local-authentication": "~17.0.8",
+    "expo-secure-store": "~15.0.8",
+    "expo-sharing": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
+    "papaparse": "^5.5.3",
+    "react": "19.1.0",
+    "react-hook-form": "^7.74.0",
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-get-random-values": "^2.0.0",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "ulid": "^3.0.2",
+    "victory-native": "^41.20.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.0",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}

@@ -1,0 +1,9 @@
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log
+
+# Spec / docs scratch
+/_scratch/

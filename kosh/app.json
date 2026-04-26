@@ -44,15 +44,7 @@
           "faceIDPermission": "Allow Kosh to use Face ID to unlock your portfolio."
         }
       ],
-      [
-        "@op-engineering/op-sqlite",
-        {
-          "sqlcipher": true
-        }
-      ],
-      "expo-document-picker",
-      "expo-file-system",
-      "react-native-gesture-handler"
+      "expo-document-picker"
     ]
   }
 }

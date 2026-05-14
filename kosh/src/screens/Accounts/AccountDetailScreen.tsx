@@ -107,18 +107,22 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
   };
 
   return (
-    <Screen scroll={false}>
-      <Pressable onPress={onBack}>
-        <Text style={styles.back}>‹ Accounts</Text>
-      </Pressable>
-      <Text style={styles.h1}>{account.nickname}</Text>
-      <Text style={styles.sub}>
-        {BUCKET_LABELS[account.bucket]} · {account.provider}
-      </Text>
-      <Money value={total} style={styles.total} />
+    <Screen scroll={false} padded={false}>
+      {/* Fixed header — account name, type, and total never scroll. */}
+      <View style={styles.header}>
+        <Pressable onPress={onBack} hitSlop={8}>
+          <Text style={styles.back}>‹ Accounts</Text>
+        </Pressable>
+        <Text style={styles.h1}>{account.nickname}</Text>
+        <Text style={styles.sub}>
+          {BUCKET_LABELS[account.bucket]} · {account.provider}
+        </Text>
+        <Money value={total} style={styles.total} />
+      </View>
 
+      {/* The holdings list scrolls in the space below the header. */}
       <FlatList
-        style={{ marginTop: spacing.lg }}
+        style={styles.list}
         data={holdings}
         keyExtractor={(h) => h.id}
         ListEmptyComponent={
@@ -129,7 +133,7 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
             <Text style={styles.swipeHint}>Swipe a row left for actions</Text>
           ) : null
         }
-        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <SwipeableHoldingRow
             holding={item}
@@ -139,9 +143,16 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
         )}
       />
 
-      <Pressable style={styles.dangerBtn} onPress={deleteAccount}>
-        <Text style={styles.dangerTxt}>Delete account</Text>
-      </Pressable>
+      {/* Pinned footer — outlined destructive button: clearly a button,
+          clearly dangerous, and out of the natural tap flow. */}
+      <View style={styles.footer}>
+        <Pressable
+          style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.6 }]}
+          onPress={deleteAccount}
+        >
+          <Text style={styles.deleteBtnTxt}>Delete account</Text>
+        </Pressable>
+      </View>
 
       {updating ? (
         <UpdateValueModal holding={updating} onClose={() => setUpdating(null)} onDone={onValueUpdated} />
@@ -366,11 +377,22 @@ function UpdateValueModal({
 }
 
 const styles = StyleSheet.create({
+  // Fixed header above the scrolling list.
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+  },
   back: { color: colors.accent, fontSize: 14, marginBottom: spacing.sm },
   h1: { ...typography.h1, color: colors.textPrimary },
   sub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
   total: { ...typography.headline, color: colors.textPrimary, marginTop: spacing.md },
-  empty: { color: colors.textMuted, padding: spacing.lg },
+
+  // Scrolling holdings list — fills the space between header and footer.
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
+
+  empty: { color: colors.textMuted, paddingVertical: spacing.lg },
   swipeHint: {
     ...typography.micro,
     color: colors.textMuted,
@@ -421,8 +443,27 @@ const styles = StyleSheet.create({
   historyDate: { color: colors.textMuted, fontSize: 12 },
   historyVal: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
   link: { color: colors.accent, marginTop: spacing.md },
-  dangerBtn: { padding: spacing.md, alignItems: 'center' },
-  dangerTxt: { color: colors.negative, fontWeight: '600' },
+
+  // Pinned footer with the destructive action.
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  // Outlined (not filled) so it reads as a clear button but doesn't invite
+  // an accidental tap the way a big solid red bar would. Confirmed by an
+  // Alert on press.
+  deleteBtn: {
+    borderWidth: 1.5,
+    borderColor: colors.negative,
+    borderRadius: radius.pill,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  deleteBtnTxt: { color: colors.negative, fontWeight: '700', fontSize: 15 },
 
   modalRoot: {
     flex: 1,

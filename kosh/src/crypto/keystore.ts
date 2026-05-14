@@ -5,6 +5,7 @@ const K_PASSPHRASE = 'kosh.passphrase.v1';
 const K_SETUP_FLAG = 'kosh.setup_complete.v1';
 const K_BIOMETRIC_ENABLED = 'kosh.biometric_enabled.v1';
 const K_LAST_ACTIVE_PROFILE = 'kosh.last_active_profile.v1';
+const K_PRIVACY_MODE = 'kosh.privacy_mode.v1';
 
 const BIO_OPTIONS: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
@@ -31,6 +32,19 @@ export async function clearAllSecrets(): Promise<void> {
   await SecureStore.deleteItemAsync(K_SETUP_FLAG, PLAIN_OPTIONS).catch(() => undefined);
   await SecureStore.deleteItemAsync(K_BIOMETRIC_ENABLED, PLAIN_OPTIONS).catch(() => undefined);
   await SecureStore.deleteItemAsync(K_LAST_ACTIVE_PROFILE, PLAIN_OPTIONS).catch(() => undefined);
+  await SecureStore.deleteItemAsync(K_PRIVACY_MODE, PLAIN_OPTIONS).catch(() => undefined);
+}
+
+// Privacy mode: when on, all monetary figures render as an unreadable
+// Braille-cell pattern. It's a UI preference (not a secret), persisted so
+// the app reopens in whatever state it was left in.
+export async function setPrivacyMode(hidden: boolean): Promise<void> {
+  await SecureStore.setItemAsync(K_PRIVACY_MODE, hidden ? '1' : '0', PLAIN_OPTIONS);
+}
+
+export async function getPrivacyMode(): Promise<boolean> {
+  const v = await SecureStore.getItemAsync(K_PRIVACY_MODE, PLAIN_OPTIONS);
+  return v === '1';
 }
 
 // Last-viewed profile id. Persisted across launches so opening the app

@@ -82,6 +82,14 @@ export interface NetWorthPoint {
   value: number;
 }
 
+// Normalise an instrument name for fuzzy matching across statement
+// re-uploads — uppercase, drop everything that isn't alphanumeric. So
+// "Axis Arbitrage Direct-G" and "AXIS ARBITRAGE DIRECT - G" both become
+// "AXISARBITRAGEDIRECTG" and still match.
+function normalizeForMatch(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 // Append a value-history row for a holding. Caller is responsible for the
 // surrounding transaction if atomicity with the holdings table is needed.
 function insertHoldingValue(
@@ -158,24 +166,107 @@ export const HoldingRepository = {
     return this.get(id)!;
   },
 
-  // Re-value an existing holding. Appends a history row AND updates the
-  // denormalised current value/date on the holdings row. The new date can
-  // be any date the user picks (e.g. "PPF balance as of 31 May").
+  // Re-value an existing holding for a given date. Upsert-by-date: one
+  // value point per date — re-recording the same date overwrites that
+  // point rather than stacking a duplicate. The denormalised current
+  // value/date on the holdings row is recomputed as the latest by date,
+  // so back-dating an old value never clobbers a newer "current".
   updateValue(holdingId: string, valueInr: number, asOfDate: string) {
     const db = getDb();
     const ts = now();
     db.executeSync('BEGIN;');
     try {
-      insertHoldingValue(db, holdingId, valueInr, asOfDate, ts);
-      db.executeSync(
-        `UPDATE holdings SET value_inr = ?, as_of_date = ?, updated_at = ? WHERE id = ?;`,
-        [valueInr, asOfDate, ts, holdingId]
+      const existing = db.executeSync(
+        'SELECT id FROM holding_values WHERE holding_id = ? AND as_of_date = ? LIMIT 1;',
+        [holdingId, asOfDate]
       );
+      const existingId = (existing.rows?.[0] as { id?: string } | undefined)?.id;
+      if (existingId) {
+        db.executeSync(
+          'UPDATE holding_values SET value_inr = ?, created_at = ? WHERE id = ?;',
+          [valueInr, ts, existingId]
+        );
+      } else {
+        insertHoldingValue(db, holdingId, valueInr, asOfDate, ts);
+      }
+      // Recompute the denormalised current value = latest history point.
+      const latest = db.executeSync(
+        `SELECT value_inr, as_of_date FROM holding_values
+         WHERE holding_id = ? ORDER BY as_of_date DESC, created_at DESC LIMIT 1;`,
+        [holdingId]
+      );
+      const row = latest.rows?.[0] as
+        | { value_inr: number; as_of_date: string }
+        | undefined;
+      if (row) {
+        db.executeSync(
+          'UPDATE holdings SET value_inr = ?, as_of_date = ?, updated_at = ? WHERE id = ?;',
+          [row.value_inr, row.as_of_date, ts, holdingId]
+        );
+      }
       db.executeSync('COMMIT;');
     } catch (err) {
       db.executeSync('ROLLBACK;');
       throw err;
     }
+  },
+
+  // Merge a freshly-parsed set of holdings into an account, PRESERVING
+  // value history. Used when a periodic statement (PMS, CAS) is uploaded
+  // again next period. Each incoming holding is matched to an existing one
+  //   - by ISIN if present (CAS), else
+  //   - by a normalised instrument name (Fisdom has no ISIN; the
+  //     normalisation strips case + punctuation so minor parse drift
+  //     still matches).
+  // Matched -> append a value point at the statement date + refresh
+  // metadata. Unmatched -> created fresh. Existing holdings absent from
+  // the new statement are left alone (the user deletes those manually).
+  mergeForAccount(
+    accountId: string,
+    incoming: CreateHoldingInput[]
+  ): { updated: number; created: number } {
+    const db = getDb();
+    const existing = this.listByAccount(accountId);
+    const byIsin = new Map<string, Holding>();
+    const byName = new Map<string, Holding>();
+    for (const h of existing) {
+      if (h.isin) byIsin.set(h.isin.toUpperCase(), h);
+      byName.set(normalizeForMatch(h.instrumentName), h);
+    }
+    let updated = 0;
+    let created = 0;
+    for (const inc of incoming) {
+      let match: Holding | undefined;
+      if (inc.isin) match = byIsin.get(inc.isin.toUpperCase());
+      if (!match) match = byName.get(normalizeForMatch(inc.instrumentName));
+      if (match) {
+        // Consume the match so a second incoming row can't re-match it.
+        if (match.isin) byIsin.delete(match.isin.toUpperCase());
+        byName.delete(normalizeForMatch(match.instrumentName));
+        this.updateValue(match.id, inc.valueInr, inc.asOfDate);
+        // Refresh the holding's metadata to the latest statement's values.
+        db.executeSync(
+          `UPDATE holdings SET instrument_name = ?, isin = ?, quantity = ?, unit_price = ?, extras_json = ?, parser_name = ?, parser_version = ?, source_document_id = ?, updated_at = ? WHERE id = ?;`,
+          [
+            inc.instrumentName,
+            inc.isin ?? null,
+            inc.quantity ?? null,
+            inc.unitPrice ?? null,
+            inc.extras ? JSON.stringify(inc.extras) : null,
+            inc.parserName ?? null,
+            inc.parserVersion ?? null,
+            inc.sourceDocumentId ?? null,
+            now(),
+            match.id,
+          ]
+        );
+        updated += 1;
+      } else {
+        this.create(inc);
+        created += 1;
+      }
+    }
+    return { updated, created };
   },
 
   // Full value history for one holding, oldest first.

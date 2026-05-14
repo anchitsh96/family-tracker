@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -44,6 +44,8 @@ export function ConfirmExtractedHoldings({ result, filename, onSaved, onCancel }
   const save = async () => {
     setBusy(true);
     try {
+      let updated = 0;
+      let created = 0;
       for (const bundle of result.bundles) {
         const account = AccountRepository.findOrCreate({
           profileId,
@@ -65,10 +67,24 @@ export function ConfirmExtractedHoldings({ result, filename, onSaved, onCancel }
             parserName: result.parser.name,
             parserVersion: result.parser.version,
           }));
-        HoldingRepository.replaceForAccount(account.id, newHoldings);
+        // Merge (not replace) so re-uploading a later statement appends
+        // value-history points to existing holdings instead of wiping them.
+        const res = HoldingRepository.mergeForAccount(account.id, newHoldings);
+        updated += res.updated;
+        created += res.created;
       }
       bump();
-      onSaved();
+      if (updated > 0) {
+        Alert.alert(
+          'Holdings saved',
+          `${created} added, ${updated} updated. The ${updated} updated holding${
+            updated === 1 ? '' : 's'
+          } kept their history — a new value point was recorded at the statement date.`,
+          [{ text: 'OK', onPress: onSaved }]
+        );
+      } else {
+        onSaved();
+      }
     } catch (e: any) {
       setBusy(false);
       console.warn('Save failed:', e?.message);

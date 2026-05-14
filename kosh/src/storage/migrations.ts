@@ -75,4 +75,27 @@ CREATE TABLE IF NOT EXISTS account_metadata (
 );
 `,
   },
+  {
+    // v2: holding value history. Every holding can be re-valued over time
+    // (PPF balance grows, an FD accrues, a stock moves). Each re-valuation
+    // appends a row here; the holdings table keeps the LATEST value/date
+    // denormalised for fast reads. The net-worth-over-time chart is
+    // reconstructed from this history.
+    version: 2,
+    sql: `
+CREATE TABLE IF NOT EXISTS holding_values (
+  id TEXT PRIMARY KEY,
+  holding_id TEXT NOT NULL REFERENCES holdings(id) ON DELETE CASCADE,
+  value_inr REAL NOT NULL,
+  as_of_date TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_holding_values_holding ON holding_values(holding_id, as_of_date);
+
+INSERT INTO holding_values (id, holding_id, value_inr, as_of_date, created_at)
+SELECT h.id || '-v0', h.id, h.value_inr, h.as_of_date, h.created_at
+FROM holdings h
+WHERE NOT EXISTS (SELECT 1 FROM holding_values hv WHERE hv.holding_id = h.id)
+`,
+  },
 ];

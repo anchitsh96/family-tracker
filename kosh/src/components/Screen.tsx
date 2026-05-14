@@ -38,6 +38,6 @@ export function Screen({ children, scroll = true, padded = true }: Props) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  padded: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg },
+  padded: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.md },
   scrollContent: { flexGrow: 1 },
 });

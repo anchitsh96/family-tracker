@@ -42,7 +42,7 @@ export function NetWorthCard({ total, asOf, profileName, delta }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { paddingTop: spacing.sm, paddingBottom: spacing.xl },
+  wrap: { paddingTop: spacing.sm, paddingBottom: spacing.lg },
   kicker: {
     ...typography.body,
     color: colors.textSecondary,

@@ -40,6 +40,26 @@ const VERSION = '1';
 const ISIN_RE = /\bIN[A-Z0-9]{10}\b/;
 const EQUITY_ISIN_RE = /^INE[A-Z0-9]{9}$/;
 const MF_ISIN_RE = /^INF[A-Z0-9]{9}$/;
+// Non-anchored variant for searching an ISIN *within* a line of text.
+const MF_ISIN_ANYWHERE = /INF[A-Z0-9]{9}/;
+
+// Column-header vocabulary for the consolidated MF table. A line whose
+// every alphabetic word is in this set is a header/label line, not a
+// scheme name — OCR scatters these labels across many short lines.
+const MF_HEADER_VOCAB = new Set([
+  'average', 'total', 'gross', 'cumulative', 'expense', 'ratio',
+  'commission', 'unrealised', 'unreal', 'ised', 'closing', 'scheme',
+  'name', 'isin', 'folio', 'arn', 'code', 'bal', 'nav', 'amount', 'ter',
+  'terms', 'paid', 'to', 'distributors', 'profit', 'loss', 'inr', 'units',
+  'invested', 'valuation', 'regular', 'direct', 'absolute', 'in', 'of',
+  'as', 'on', 'the', 'r', 'no',
+]);
+
+function isMfHeaderLine(line: string): boolean {
+  const words = line.match(/[A-Za-z]{2,}/g);
+  if (!words || words.length === 0) return false;
+  return words.every((w) => MF_HEADER_VOCAB.has(w.toLowerCase()));
+}
 // Indian-formatted decimal: matches both 1,00,000.00 and plain 10849899
 const NUM_RE = /-?(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)/;
 const NUM_RE_GLOBAL = new RegExp(NUM_RE.source, 'g');
@@ -54,10 +74,50 @@ const DETECT_ANCHORS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
+// OCR-tolerant Indian-number parser.
+//
+// The CAS reaches us via iOS Vision OCR, which makes two recurring
+// mistakes on Indian-formatted currency:
+//   1. Reads a grouping comma as a period: "1,77,273.08" → "1.77,273.08"
+//   2. Garbles the ₹ glyph into &, F, f, etc.
+//
+// Rule that survives both: strip currency glyphs, then treat the LAST
+// '.' as the decimal point and EVERY other '.' or ',' as a (discarded)
+// grouping separator. "1.77,273.08" → int "177273", frac "08" → 177273.08.
 function parseIndianNumber(s: string): number {
-  const cleaned = s.replace(/,/g, '').replace(/[`₹]/g, '').trim();
-  const n = Number(cleaned);
-  return isFinite(n) ? n : 0;
+  let t = s.replace(/[`₹&Ff₨]/g, '').trim();
+  if (!t) return 0;
+  const neg = /^-/.test(t);
+  t = t.replace(/[^\d.,]/g, '');
+  if (!t || !/\d/.test(t)) return 0;
+  const lastDot = t.lastIndexOf('.');
+  let intPart: string;
+  let fracPart = '';
+  if (lastDot >= 0) {
+    intPart = t.slice(0, lastDot).replace(/[.,]/g, '');
+    fracPart = t.slice(lastDot + 1).replace(/[.,]/g, '');
+  } else {
+    intPart = t.replace(/[.,]/g, '');
+  }
+  const n = Number(`${intPart || '0'}.${fracPart || '0'}`);
+  if (!isFinite(n)) return 0;
+  return neg ? -n : n;
+}
+
+// OCR-tolerant "is this token a number" check — looser than NUM_RE so it
+// accepts "1.77,273.08" and currency-prefixed tokens.
+function looksNumeric(t: string): boolean {
+  const cleaned = t.replace(/[`₹&Ff₨]/g, '');
+  return /^-?[\d.,]+$/.test(cleaned) && /\d/.test(cleaned);
+}
+
+// A token is "smushed" — two adjacent table cells OCR'd with no space —
+// when it has 2+ dots AND is long. A legit OCR-comma-confused number like
+// "1.77,273.08" also has 2 dots but stays short (≤13 chars); a real smush
+// like "249.7491817.5925,00,000.00" is much longer.
+function isSmushedToken(t: string): boolean {
+  const dots = (t.match(/\./g) ?? []).length;
+  return dots >= 2 && t.length > 13;
 }
 
 function findAllNumbersOnLine(line: string): number[] {
@@ -180,10 +240,12 @@ function extractEquityBlocks(lines: string[]): EquityBlock[] {
   const blocks: EquityBlock[] = [];
 
   // Find "Portfolio Value ` <n> as on <date>" lines that are NOT bond ones.
+  // OCR garbles the ₹/` glyph into &, F, f etc. — and may drop it — so the
+  // currency glyph is optional and tolerant.
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     const m = line.match(
-      /^Portfolio Value\s+[`₹]\s*([\d,]+(?:\.\d+)?)\s+as on/i
+      /Portfolio Value\s*[`₹&Ff₨]?\s*([\d.,]+)\s+as on/i
     );
     if (!m) continue;
     if (/for\s+Bond/i.test(line)) continue;
@@ -223,6 +285,18 @@ function extractEquityBlocks(lines: string[]): EquityBlock[] {
   return blocks;
 }
 
+// Equity rows arrive in two shapes depending on the text backend:
+//
+//   pdftotext -raw:                    Vision OCR:
+//     INE018A01030                       LARSEN & TOUBRO LIMITED-
+//     LARSEN&TOUBROLIMITED-              INE018A01030 7.000 -- -- 7.000 3504.300 24,530.10
+//     EQUITYSHARESOFRS.2/-EACH
+//     7.000 -- -- 7.000 3504.300 24,530.10
+//
+// So an ISIN line may carry its data inline (OCR) or on a following line
+// (raw). We handle both. The trailing numbers on the data are:
+//   … <free balance / qty> <market price> <value in ₹>
+// — value is the LAST number, price the 2nd-last, qty the 3rd-last.
 function parseEquityRows(
   lines: string[],
   from: number,
@@ -231,40 +305,72 @@ function parseEquityRows(
   const out: EquityRow[] = [];
   let pendingIsin: string | null = null;
   let pendingNameParts: string[] = [];
+
+  const pushRow = (isin: string, nameParts: string[], numLine: string) => {
+    const nums = findAllNumbersOnLine(numLine);
+    if (nums.length < 3) return false;
+    const valueInr = nums[nums.length - 1] ?? 0;
+    const unitPrice = nums[nums.length - 2] ?? 0;
+    const quantity = nums[nums.length - 3] ?? 0;
+    if (valueInr <= 0) return false;
+    out.push({
+      isin,
+      name: unsmushName(nameParts.join(' ')) || isin,
+      quantity,
+      unitPrice,
+      valueInr,
+    });
+    return true;
+  };
+
   for (let i = from; i <= to; i++) {
     const raw = (lines[i] ?? '').trim();
     if (!raw) continue;
-    // Equity ISIN match (line is just the ISIN, optionally with trailing junk)
-    const isinMatch = raw.match(EQUITY_ISIN_RE) || raw.match(/^(INE[A-Z0-9]{9})/);
-    if (isinMatch && isinMatch[0].startsWith('INE') && isinMatch[0].length === 12) {
-      // If we already had a pending ISIN with no data row, drop it.
-      pendingIsin = isinMatch[0];
-      pendingNameParts = [];
+
+    const isinAtStart = raw.match(/^(INE[A-Z0-9]{9})\b\s*(.*)$/);
+    if (isinAtStart) {
+      const isin = isinAtStart[1]!;
+      const rest = (isinAtStart[2] ?? '').trim();
+      // Does the ISIN line carry its own numeric data? (OCR shape)
+      if (rest && findAllNumbersOnLine(rest).length >= 3) {
+        // Inline text before the first number is part of the name.
+        const numStart = rest.search(/\s*-?\d/);
+        const inlineName = numStart > 0 ? rest.slice(0, numStart).trim() : '';
+        const nameParts = [...pendingNameParts];
+        if (inlineName) nameParts.push(inlineName);
+        pushRow(isin, nameParts, rest);
+        pendingIsin = null;
+        pendingNameParts = [];
+      } else {
+        // ISIN-only line; data follows (raw shape).
+        pendingIsin = isin;
+        pendingNameParts = [];
+      }
       continue;
     }
-    if (!pendingIsin) continue;
-    if (isDataNumericLine(raw)) {
-      const nums = findAllNumbersOnLine(raw);
-      // Trailing 3 are: free balance (== quantity), market price, value
-      const valueInr = nums[nums.length - 1] ?? 0;
-      const unitPrice = nums[nums.length - 2] ?? 0;
-      const quantity = nums[nums.length - 3] ?? 0;
-      if (valueInr > 0 && quantity > 0) {
-        const name = unsmushName(pendingNameParts.join(' '));
-        out.push({
-          isin: pendingIsin,
-          name: name || pendingIsin,
-          quantity,
-          unitPrice,
-          valueInr,
-        });
-      }
+
+    if (pendingIsin && isDataNumericLine(raw)) {
+      pushRow(pendingIsin, pendingNameParts, raw);
       pendingIsin = null;
       pendingNameParts = [];
       continue;
     }
-    // Otherwise, treat as a name continuation fragment
-    pendingNameParts.push(raw);
+
+    // Otherwise, a name fragment — keep it; it belongs to the next ISIN.
+    if (/[A-Za-z]/.test(raw)) {
+      // Drop obvious column-header / account-detail / page-header lines.
+      if (/ISIN|Security|Current|Frozen|Pledge|Market|Face Value|Portfolio Value|HOLDING STATEMENT|DEPOSITORY|CONSOLIDATED|DP Nam|BO ID|Client Id|Account Type|Statement/i.test(raw)) {
+        continue;
+      }
+      // Drop bilingual page-header noise — lines that are <55% ASCII
+      // letters/spaces are the Devanagari+English overlap garble.
+      const asciiish = (raw.match(/[A-Za-z0-9 .,&/-]/g) ?? []).length;
+      if (asciiish / raw.length < 0.55) continue;
+      pendingNameParts.push(raw);
+      // A fund/security name spans at most ~2 OCR lines — keep only the
+      // most recent two so stale fragments from earlier rows don't leak.
+      if (pendingNameParts.length > 2) pendingNameParts.shift();
+    }
   }
   return out;
 }
@@ -297,11 +403,16 @@ function extractBondBlocks(
   lines: string[]
 ): { rows: BondRow[]; dematLabel: string }[] {
   const blocks: { rows: BondRow[]; dematLabel: string }[] = [];
+  // The header text varies between layout-mode and raw-mode pdftotext
+  // output. In raw mode the words run together: "HOLDINGSTATEMENTOFBONDS".
+  // Use \s* so it matches both forms.
+  const headerRe = /HOLDING\s*STATEMENT\s*OF\s*BONDS/i;
+  const terminatorRe = /^Portfolio\s*Value\s*for\s*Bond/i;
   for (let i = 0; i < lines.length; i++) {
-    if (!/HOLDING STATEMENT OF BONDS/i.test(lines[i] ?? '')) continue;
+    if (!headerRe.test(lines[i] ?? '')) continue;
     let endLine = i + 1;
     for (let j = i + 1; j < Math.min(i + 100, lines.length); j++) {
-      if (/^Portfolio Value for Bond/i.test((lines[j] ?? '').trim())) {
+      if (terminatorRe.test((lines[j] ?? '').trim())) {
         endLine = j;
         break;
       }
@@ -404,17 +515,20 @@ interface MfRow {
 }
 
 function extractMfRows(lines: string[]): MfRow[] {
-  // Bound the search to the MF consolidated section to avoid pulling rows
-  // from the per-folio transaction tables (which also have ARN- markers).
+  // Bound to the consolidated section: "MUTUAL FUND UNITS HELD AS ON …"
+  // through "Grand Total". This is essential — the per-folio transaction
+  // tables earlier in the document ALSO contain "ARN-" tokens, but those
+  // carry a broker suffix ("ARN-111569/E273208"). The consolidated rows
+  // use a bare "ARN-111569".
   let sectionStart = -1;
-  let sectionEnd = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    if (/MUTUAL FUND UNITS HELD AS ON/i.test(lines[i] ?? '')) {
+    if (/MUTUAL\s*FUND\s*UNITS\s*HELD\s*AS\s*ON/i.test(lines[i] ?? '')) {
       sectionStart = i;
       break;
     }
   }
   if (sectionStart < 0) return [];
+  let sectionEnd = lines.length;
   for (let j = sectionStart + 1; j < lines.length; j++) {
     if (/^Grand\s*Total\b/i.test((lines[j] ?? '').trim())) {
       sectionEnd = j;
@@ -424,108 +538,103 @@ function extractMfRows(lines: string[]): MfRow[] {
 
   const out: MfRow[] = [];
   for (let i = sectionStart + 1; i < sectionEnd; i++) {
-    const line = (lines[i] ?? '').trim();
-    if (!line.includes('ARN-')) continue;
+    // OCR sometimes smushes the folio into the ARN code
+    // ("48751936ARN-111569") — re-insert a space so the ARN token stands
+    // alone. Same for an ISIN smushed against a following folio.
+    const line = (lines[i] ?? '')
+      .trim()
+      .replace(/(\d)(ARN-\d)/g, '$1 $2')
+      .replace(/(INF[A-Z0-9]{9})(\d)/g, '$1 $2');
+    // Consolidated rows: a bare "ARN-<digits>" token. Skip per-folio
+    // transaction rows ("ARN-<digits>/E…") and the header ("ARN Code").
+    if (!/\bARN-\d+\b/.test(line)) continue;
+    if (/ARN-\d+\//.test(line)) continue;
 
-    // Tokenize the data line.
     const tokens = line.split(/\s+/).filter(Boolean);
-    const arnIdx = tokens.findIndex((t) => /^ARN-/.test(t));
+    const arnIdx = tokens.findIndex((t) => /^ARN-\d+$/.test(t));
     if (arnIdx < 0) continue;
-    // After ARN there should be at least 9 numeric tokens (units, NAV,
-    // invested, valuation, TER_R, TER_D, commission, P/L, P/L%).
-    const numericTail = tokens
-      .slice(arnIdx + 1)
-      .filter((t) => NUM_RE.test(t) && t.match(NUM_RE)?.[0] === t);
-    if (numericTail.length < 4) continue;
-    const closingUnits = parseIndianNumber(numericTail[0] ?? '0');
-    const nav = parseIndianNumber(numericTail[1] ?? '0');
-    const cumulativeInvested = parseIndianNumber(numericTail[2] ?? '0');
-    const valueInr = parseIndianNumber(numericTail[3] ?? '0');
-    if (valueInr <= 0) continue;
 
-    // ISIN: same line (token before folio) OR previous line.
+    // Clean numeric tokens after ARN. Skip smushed cells (two columns
+    // OCR'd with no gap) — we lose units/NAV for that one row but the
+    // valuation, counted from the END, stays correct.
+    const afterArn = tokens.slice(arnIdx + 1);
+    const cleanNums: number[] = [];
+    for (const t of afterArn) {
+      if (isSmushedToken(t)) continue;
+      if (looksNumeric(t)) cleanNums.push(parseIndianNumber(t));
+    }
+    // Expected trailing columns: … valuation, TER_regular, commission,
+    // unrealised P/L, unrealised P/L%. Valuation is the 5th from the end.
+    if (cleanNums.length < 5) continue;
+    const valueInr = cleanNums[cleanNums.length - 5] ?? 0;
+    if (valueInr <= 0) continue;
+    // units/NAV/invested only trustworthy on a fully-clean 8-number row.
+    const fullRow = cleanNums.length >= 8;
+    const closingUnits = fullRow ? (cleanNums[0] ?? 0) : 0;
+    const nav = fullRow ? (cleanNums[1] ?? 0) : 0;
+    const cumulativeInvested = fullRow
+      ? (cleanNums[cleanNums.length - 6] ?? 0)
+      : 0;
+
+    // ISIN: on this line (before the folio) OR on a preceding line.
     let isin = '';
     let folioNo = '';
-    // Tokens before ARN: one of [<ISIN> <folio>] or [<folio>] (multi-line).
     const preArn = tokens.slice(0, arnIdx);
     const isinTok = preArn.find((t) => MF_ISIN_RE.test(t));
     if (isinTok) {
       isin = isinTok;
-      const rest = preArn.filter((t) => t !== isinTok);
-      folioNo = rest.join('').replace(/­/g, '');
+      folioNo = preArn.filter((t) => t !== isinTok).join('').replace(/­/g, '');
     } else {
-      // ISIN is on a preceding line.
-      for (let k = i - 1; k >= Math.max(sectionStart, i - 5); k--) {
-        const lkTokens = (lines[k] ?? '').trim().split(/\s+/).filter(Boolean);
-        const found = lkTokens.find((t) => MF_ISIN_RE.test(t));
+      for (let k = i - 1; k >= Math.max(sectionStart, i - 6); k--) {
+        const found = (lines[k] ?? '')
+          .split(/\s+/)
+          .find((t) => MF_ISIN_RE.test(t));
         if (found) {
           isin = found;
-          // The folio may be on a line between the ISIN and the data line.
-          if (k < i - 1) {
-            const folioFragments: string[] = [];
-            for (let m = k + 1; m < i; m++) {
-              const lm = (lines[m] ?? '').trim();
-              if (lm) folioFragments.push(lm.replace(/­/g, ''));
-            }
-            folioNo = folioFragments.join('');
-          }
-          // Anything before ARN on the data line is the folio tail.
-          if (preArn.length > 0) {
-            folioNo += preArn.join('').replace(/­/g, '');
-          }
           break;
         }
       }
     }
     if (!isin) continue;
 
-    // Scheme name = non-numeric, non-ISIN, non-folio lines preceding the
-    // ISIN, going up until we hit the previous row's data line, the section
-    // header, or a recognizable column-header keyword.
-    const nameParts: string[] = [];
-    const stopRe = /MUTUAL FUND UNITS|Scheme Name|Closing|NAV|Cumulative|Valuation|Average Total|Gross|Regular|Direct|Commission|Profit|Loss|Folio No|ARN Code/i;
-    // Find the line where this row's "block" begins: the line after the
-    // previous ARN data line.
-    let blockStart = sectionStart + 1;
-    for (let k = i - 1; k > sectionStart; k--) {
+    // Scheme name: the alphabetic lines between the previous row and this
+    // one. Bound the lookback to the previous ARN row (or 12 lines).
+    const LOOKBACK_MAX = 12;
+    let blockStart = Math.max(sectionStart + 1, i - LOOKBACK_MAX);
+    for (let k = i - 1; k > Math.max(sectionStart, i - LOOKBACK_MAX); k--) {
       const lk = (lines[k] ?? '').trim();
-      if (!lk) continue;
-      if (lk.includes('ARN-') && /\d/.test(lk) && k !== i) {
+      if (lk && /\bARN-\d+\b/.test(lk)) {
         blockStart = k + 1;
         break;
       }
     }
-    for (let k = blockStart; k < i; k++) {
-      const lk = (lines[k] ?? '').trim();
+    const nameParts: string[] = [];
+    for (let k = blockStart; k <= i; k++) {
+      let lk = (lines[k] ?? '').trim();
       if (!lk) continue;
-      if (ISIN_RE.test(lk)) continue;
-      if (stopRe.test(lk)) continue;
-      if (/^[\d,./%-]+$/.test(lk)) continue;
-      // Folio fragments are pure-digits-with-slash-or-soft-hyphen
-      if (/^[\d/­-]+$/.test(lk)) continue;
-      if (lk.length < 2) continue;
+      // If the line contains an ISIN, only the text BEFORE it is name.
+      const isinM = lk.match(MF_ISIN_ANYWHERE);
+      if (isinM) {
+        const idx = lk.indexOf(isinM[0]);
+        if (idx > 0) lk = lk.slice(0, idx).trim();
+        else continue; // ISIN at start → nothing usable on this line
+      }
+      if (!lk) continue;
+      // Drop folio fragments, pure punctuation/number lines, and any
+      // line that is purely column-header vocabulary.
+      if (/^[\d,./%()­-]+$/.test(lk)) continue;
+      if (isMfHeaderLine(lk)) continue;
+      // Mostly-Devanagari page-header noise.
+      if ((lk.match(/[A-Za-z0-9]/g) ?? []).length < 2) continue;
       nameParts.push(lk);
     }
     const schemeName = unsmushName(nameParts.join(' '));
 
-    // AMC: try to recover from scheme name prefix or a known list.
     let amc: string | undefined;
     const amcKnown = [
-      'Canara Robeco',
-      'DSP',
-      'HDFC',
-      'ICICI Prudential',
-      'Kotak',
-      'SBI',
-      'Axis',
-      'Aditya Birla',
-      'Nippon India',
-      'UTI',
-      'Tata',
-      'Franklin',
-      'Mirae',
-      'Quant',
-      'PPFAS',
+      'Canara Robeco', 'DSP', 'HDFC', 'ICICI Prudential', 'Kotak', 'SBI',
+      'Axis', 'Aditya Birla', 'Nippon India', 'UTI', 'Tata', 'Franklin',
+      'Mirae', 'Quant', 'PPFAS', 'Motilal Oswal', 'Edelweiss', 'Bandhan',
     ];
     for (const a of amcKnown) {
       if (schemeName.toUpperCase().includes(a.toUpperCase())) {

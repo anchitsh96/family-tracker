@@ -1,48 +1,67 @@
 import { TextStyle } from 'react-native';
 
-// Type scale tuned for the Robinhood-style "big numeric headline" pattern.
+// Inter typography, modelled on Wise's design system. Inter is the
+// primary typeface across UI (Wise reserves a separate "Wise Sans" for
+// promotional display moments — we don't have that font, so we use Inter
+// at a heavier weight for our display headlines).
 //
-// Notes:
-//  • `tabular-nums` keeps digits monospaced so values don't shimmy when the
-//    underlying number changes (₹66,67,242.61 vs ₹68,11,000.00).
-//  • Weights lean lighter than typical fintech apps — the visual hierarchy
-//    comes from size + tight tracking, not boldness.
-//  • iOS auto-picks SF Pro for system fonts; we let it. Adding a custom
-//    font would force a native rebuild. SF Pro already has tabular figures.
+// IMPORTANT: in React Native with custom fonts you cannot rely on
+// `fontWeight` to pick the right cut. iOS resolves the cut by exact
+// PostScript family name. So we set `fontFamily: 'Inter-…'` for every
+// style and DON'T set fontWeight (it's baked into the family name).
+//
+// Weights we ship (loaded in App.tsx via @expo-google-fonts/inter):
+//   Inter-Regular   = 400
+//   Inter-Medium    = 500
+//   Inter-SemiBold  = 600
+//   Inter-Bold      = 700
+
+export const fonts = {
+  regular: 'Inter-Regular',
+  medium: 'Inter-Medium',
+  semibold: 'Inter-SemiBold',
+  bold: 'Inter-Bold',
+};
 
 const tabular: TextStyle = { fontVariant: ['tabular-nums'] };
 
 export const typography = {
-  // The big net-worth number on the dashboard.
+  // Display: very large net-worth headline. Inter Bold reads almost like
+  // a custom display font at 56pt with tight tracking.
   display: {
+    fontFamily: fonts.bold,
     fontSize: 56,
-    fontWeight: '500',
-    letterSpacing: -1.4,
+    letterSpacing: -1.6,
     ...tabular,
   } as TextStyle,
 
-  // Smaller display, used for screen titles like "Add holding".
+  // Headline: screen titles ("Review extracted holdings", "Accounts").
   headline: {
-    fontSize: 32,
-    fontWeight: '500',
+    fontFamily: fonts.semibold,
+    fontSize: 30,
     letterSpacing: -0.6,
     ...tabular,
   } as TextStyle,
 
-  h1: { fontSize: 24, fontWeight: '600', letterSpacing: -0.2 } as TextStyle,
-  h2: { fontSize: 18, fontWeight: '600' } as TextStyle,
-  h3: { fontSize: 16, fontWeight: '600' } as TextStyle,
+  h1: {
+    fontFamily: fonts.semibold,
+    fontSize: 22,
+    letterSpacing: -0.2,
+  } as TextStyle,
 
-  body: { fontSize: 16, fontWeight: '400' } as TextStyle,
-  bodyStrong: { fontSize: 16, fontWeight: '600' } as TextStyle,
-  caption: { fontSize: 13, fontWeight: '500' } as TextStyle,
-  micro: { fontSize: 11, fontWeight: '500', letterSpacing: 0.4 } as TextStyle,
+  h2: { fontFamily: fonts.semibold, fontSize: 18 } as TextStyle,
+  h3: { fontFamily: fonts.semibold, fontSize: 16 } as TextStyle,
 
-  // Pill text (period selector, profile chip, badges).
-  pill: { fontSize: 13, fontWeight: '600', letterSpacing: 0.1 } as TextStyle,
+  body: { fontFamily: fonts.regular, fontSize: 16 } as TextStyle,
+  bodyStrong: { fontFamily: fonts.semibold, fontSize: 16 } as TextStyle,
+  bodyMedium: { fontFamily: fonts.medium, fontSize: 16 } as TextStyle,
+  caption: { fontFamily: fonts.medium, fontSize: 13 } as TextStyle,
+  micro: { fontFamily: fonts.medium, fontSize: 11, letterSpacing: 0.4 } as TextStyle,
 
-  // Apply on numeric runs to opt in to tabular figures + slight tightening.
-  numeric: { ...tabular, fontWeight: '500' } as TextStyle,
+  pill: { fontFamily: fonts.semibold, fontSize: 13, letterSpacing: 0.1 } as TextStyle,
 
-  mono: { fontSize: 13, fontFamily: 'Menlo' } as TextStyle,
+  // Apply on numeric runs to opt into tabular figures + Inter Medium.
+  numeric: { ...tabular, fontFamily: fonts.medium } as TextStyle,
+
+  mono: { fontFamily: 'Menlo', fontSize: 13 } as TextStyle,
 };

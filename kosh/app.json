@@ -44,7 +44,8 @@
           "faceIDPermission": "Allow Kosh to use Face ID to unlock your portfolio."
         }
       ],
-      "expo-document-picker"
+      "expo-document-picker",
+      "expo-font"
     ]
   }
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TextStyle, StyleProp } from 'react-native';
 import { colors } from '@/theme/colors';
 import { typography } from '@/theme/typography';
+import { usePrivacy } from '@/state/privacy';
 
 export function formatINR(
   value: number,
@@ -30,6 +31,36 @@ export function formatINR(
   return `${sign}₹${grouped}${frac ? '.' + frac : ''}`;
 }
 
+// Standard Braille number cells (1-9, 0 -> a-j patterns). Each digit gets
+// a distinct dot pattern, so a masked figure reads as a number-shaped
+// Braille pattern — unreadable to a normal onlooker but still clearly
+// "a number is here".
+const BRAILLE_DIGIT: Record<string, string> = {
+  '0': '⠚',
+  '1': '⠁',
+  '2': '⠃',
+  '3': '⠉',
+  '4': '⠙',
+  '5': '⠑',
+  '6': '⠋',
+  '7': '⠛',
+  '8': '⠓',
+  '9': '⠊',
+};
+
+// Privacy mask: replace every digit with its Braille cell and strip ALL
+// other decoration — ₹, commas, decimals, %, L/Cr/K suffixes, arrows —
+// leaving just the Braille pattern. Spaces between distinct number groups
+// (e.g. in the delta line) are kept so the groups stay visually separate.
+export function maskDigits(text: string): string {
+  return text
+    .replace(/[0-9]/g, (d) => BRAILLE_DIGIT[d] ?? d)
+    // Keep only Braille cells (U+2800–U+28FF) and spaces.
+    .replace(/[^⠀-⣿ ]/g, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 interface MoneyProps {
   value: number;
   compact?: boolean;
@@ -39,7 +70,9 @@ interface MoneyProps {
 }
 
 export function Money({ value, compact, decimals, signed, style }: MoneyProps) {
-  const text = formatINR(value, { compact, decimals });
+  const hidden = usePrivacy((s) => s.hidden);
+  const raw = formatINR(value, { compact, decimals });
+  const text = hidden ? maskDigits(raw) : raw;
   const color =
     signed && value > 0
       ? colors.positive

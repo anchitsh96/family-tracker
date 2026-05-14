@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Money } from '@/components/Money';
+import { Money, maskDigits } from '@/components/Money';
+import { usePrivacy } from '@/state/privacy';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -16,6 +17,13 @@ interface Props {
 // Robinhood-style net worth headline: profile name as small kicker, then the
 // big tabular-figure amount, then a coloured delta line.
 export function NetWorthCard({ total, asOf, profileName, delta }: Props) {
+  const hidden = usePrivacy((s) => s.hidden);
+  let deltaText = '';
+  if (delta) {
+    const arrow = delta.value >= 0 ? '▲' : '▼';
+    const raw = `${arrow} ₹${Math.abs(delta.value).toLocaleString('en-IN')} (${delta.percent.toFixed(2)}%)`;
+    deltaText = hidden ? maskDigits(raw) : raw;
+  }
   return (
     <View style={styles.wrap}>
       <Text style={styles.kicker}>{profileName}</Text>
@@ -28,9 +36,7 @@ export function NetWorthCard({ total, asOf, profileName, delta }: Props) {
               { color: delta.value >= 0 ? colors.positive : colors.negative },
             ]}
           >
-            {delta.value >= 0 ? '▲' : '▼'} {`₹${Math.abs(delta.value).toLocaleString('en-IN')}`}
-            {' '}
-            ({delta.percent.toFixed(2)}%)
+            {deltaText}
           </Text>
           <Text style={styles.deltaPeriod}>  {delta.period}</Text>
         </View>

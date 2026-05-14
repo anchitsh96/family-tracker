@@ -7,6 +7,7 @@ import { AccountsStack } from './AccountsStack';
 import { DocumentsScreen } from '@/screens/Documents/DocumentsScreen';
 import { SettingsScreen } from '@/screens/Settings/SettingsScreen';
 import { ProfileSwitcher } from '@/components/ProfileSwitcher';
+import { PrivacyToggle } from '@/components/PrivacyToggle';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 
@@ -18,6 +19,7 @@ function TopBar() {
       <View style={styles.topBarInner}>
         <ProfileSwitcher />
         <View style={{ flex: 1 }} />
+        <PrivacyToggle />
       </View>
     </SafeAreaView>
   );

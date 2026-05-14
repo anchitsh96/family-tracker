@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Bucket, BUCKET_LABELS } from '@/types/account';
-import { Money } from '@/components/Money';
+import { Money, maskDigits } from '@/components/Money';
+import { usePrivacy } from '@/state/privacy';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -21,6 +22,7 @@ interface Props {
 // A subtle stacked progress bar sits at the top so you still get a "shape"
 // without the visual weight of a donut chart.
 export function BucketBreakdown({ slices, total }: Props) {
+  const hidden = usePrivacy((s) => s.hidden);
   const sorted = [...slices].sort((a, b) => b.value - a.value).filter((s) => s.value > 0);
   if (sorted.length === 0 || total <= 0) {
     return (
@@ -52,7 +54,11 @@ export function BucketBreakdown({ slices, total }: Props) {
             <Text style={styles.label}>{BUCKET_LABELS[s.bucket]}</Text>
             <View style={{ flex: 1 }} />
             <Money value={s.value} compact style={styles.value} />
-            <Text style={styles.pct}>{((s.value / total) * 100).toFixed(1)}%</Text>
+            <Text style={styles.pct}>
+              {hidden
+                ? maskDigits(`${((s.value / total) * 100).toFixed(1)}%`)
+                : `${((s.value / total) * 100).toFixed(1)}%`}
+            </Text>
           </View>
         ))}
       </View>

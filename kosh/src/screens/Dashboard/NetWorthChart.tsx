@@ -7,7 +7,8 @@ import {
   Pressable,
   PanResponder,
 } from 'react-native';
-import { formatINR } from '@/components/Money';
+import { formatINR, maskDigits } from '@/components/Money';
+import { usePrivacy } from '@/state/privacy';
 import { colors } from '@/theme/colors';
 import { typography } from '@/theme/typography';
 import { spacing, radius } from '@/theme/spacing';
@@ -97,6 +98,7 @@ interface Props {
 
 const CHART_H = 150;
 const PAD = 6;
+const LINE_W = 2.5;
 
 interface Coord {
   x: number;
@@ -114,6 +116,7 @@ interface Geometry {
 export function NetWorthChart({ points, period, onPeriodChange }: Props) {
   const [width, setWidth] = useState(0);
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
+  const hidden = usePrivacy((s) => s.hidden);
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
 
   const visible = useMemo(() => filterByPeriod(points, period), [points, period]);
@@ -204,6 +207,22 @@ export function NetWorthChart({ points, period, onPeriodChange }: Props) {
 
   return (
     <View style={styles.wrap}>
+      {/* Fixed-height strip above the chart. The scrub readout lives here
+          at a constant Y — only its X follows the finger — so it never
+          overlaps the line and never jumps vertically. */}
+      <View style={styles.labelStrip}>
+        {scrubCoord && scrubPoint ? (
+          <View style={[styles.scrubLabel, { left: labelLeft, width: LABEL_W }]}>
+            <Text style={styles.scrubValue}>
+              {hidden
+                ? maskDigits(formatINR(scrubPoint.value))
+                : formatINR(scrubPoint.value)}
+            </Text>
+            <Text style={styles.scrubDate}>{fmtDate(scrubPoint.date)}</Text>
+          </View>
+        ) : null}
+      </View>
+
       <View
         style={[styles.canvas, { height: CHART_H }]}
         onLayout={onLayout}
@@ -211,19 +230,36 @@ export function NetWorthChart({ points, period, onPeriodChange }: Props) {
       >
         {geometry ? (
           <>
+            {/* The line is drawn as rotated rectangles between points.
+                A dot the exact thickness of the line sits on every vertex
+                to fill the wedge gap where two segments meet — turning the
+                polyline into one continuous line with round joins. */}
             {geometry.segments.map((s, i) => (
               <View
-                key={i}
+                key={`s${i}`}
                 style={{
                   position: 'absolute',
                   left: s.x,
-                  top: s.y - 1.25,
+                  top: s.y - LINE_W / 2,
                   width: s.len,
-                  height: 2.5,
-                  borderRadius: 2,
+                  height: LINE_W,
                   backgroundColor: lineColor,
                   transform: [{ rotateZ: `${s.angle}rad` }],
                   transformOrigin: 'left center',
+                }}
+              />
+            ))}
+            {geometry.coords.map((c, i) => (
+              <View
+                key={`j${i}`}
+                style={{
+                  position: 'absolute',
+                  left: c.x - LINE_W / 2,
+                  top: c.y - LINE_W / 2,
+                  width: LINE_W,
+                  height: LINE_W,
+                  borderRadius: LINE_W / 2,
+                  backgroundColor: lineColor,
                 }}
               />
             ))}
@@ -279,14 +315,6 @@ export function NetWorthChart({ points, period, onPeriodChange }: Props) {
             </Text>
           </View>
         )}
-
-        {/* floating value+date label while scrubbing */}
-        {scrubCoord && scrubPoint && (
-          <View style={[styles.scrubLabel, { left: labelLeft, width: LABEL_W }]}>
-            <Text style={styles.scrubValue}>{formatINR(scrubPoint.value)}</Text>
-            <Text style={styles.scrubDate}>{fmtDate(scrubPoint.date)}</Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.pills}>
@@ -308,8 +336,16 @@ export function NetWorthChart({ points, period, onPeriodChange }: Props) {
   );
 }
 
+const LABEL_STRIP_H = 42;
+
 const styles = StyleSheet.create({
   wrap: { marginTop: spacing.md },
+  // Reserved space above the chart for the scrub readout. Always present
+  // (empty when not scrubbing) so the chart never shifts.
+  labelStrip: {
+    height: LABEL_STRIP_H,
+    position: 'relative',
+  },
   canvas: { width: '100%', position: 'relative' },
   emptyInner: {
     flex: 1,
@@ -320,7 +356,7 @@ const styles = StyleSheet.create({
   emptyTxt: { ...typography.caption, color: colors.textMuted, textAlign: 'center' },
   scrubLabel: {
     position: 'absolute',
-    top: 0,
+    top: 2,
     alignItems: 'center',
   },
   scrubValue: {

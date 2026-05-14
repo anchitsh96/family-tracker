@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { useAuth } from '@/state/auth';
+import { usePrivacy } from '@/state/privacy';
 import { isFirstRun } from '@/crypto/keystore';
 import { OnboardingFlow } from '@/screens/Onboarding/OnboardingFlow';
 import { LockScreen } from '@/screens/Auth/LockScreen';
@@ -28,6 +29,10 @@ export function RootNavigator() {
 
   useEffect(() => {
     if (status !== 'unknown') return;
+    // Restore the persisted privacy-mode preference at boot — fire and
+    // forget. It resolves long before the user unlocks and the dashboard
+    // appears, and the store defaults to `hidden` until it does.
+    usePrivacy.getState().hydrate();
     (async () => {
       const first = await isFirstRun();
       setStatus(first ? 'first_run' : 'locked');

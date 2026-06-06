@@ -6,6 +6,8 @@ const K_SETUP_FLAG = 'kosh.setup_complete.v1';
 const K_BIOMETRIC_ENABLED = 'kosh.biometric_enabled.v1';
 const K_LAST_ACTIVE_PROFILE = 'kosh.last_active_profile.v1';
 const K_PRIVACY_MODE = 'kosh.privacy_mode.v1';
+const K_FX_USD_INR = 'kosh.fx.usd_inr.v1';
+const K_FX_FETCHED_AT = 'kosh.fx.usd_inr_at.v1';
 
 const BIO_OPTIONS: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
@@ -79,4 +81,24 @@ export async function getPassphraseFromKeychain(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// USD→INR rate + the wall-clock time we fetched it. Cached so the app
+// opens with the last-known rate instantly and only hits the network when
+// the cache is older than ~1 hour. Both values live in SecureStore (not
+// the encrypted DB) because they're a UI cache, not a secret — and they
+// need to survive a passphrase-unlock window too.
+export async function setUsdInrCache(rate: number, fetchedAtMs: number): Promise<void> {
+  await SecureStore.setItemAsync(K_FX_USD_INR, String(rate), PLAIN_OPTIONS);
+  await SecureStore.setItemAsync(K_FX_FETCHED_AT, String(fetchedAtMs), PLAIN_OPTIONS);
+}
+
+export async function getUsdInrCache(): Promise<{ rate: number; fetchedAtMs: number } | null> {
+  const r = await SecureStore.getItemAsync(K_FX_USD_INR, PLAIN_OPTIONS);
+  const t = await SecureStore.getItemAsync(K_FX_FETCHED_AT, PLAIN_OPTIONS);
+  if (!r || !t) return null;
+  const rate = Number(r);
+  const fetchedAtMs = Number(t);
+  if (!Number.isFinite(rate) || !Number.isFinite(fetchedAtMs) || rate <= 0) return null;
+  return { rate, fetchedAtMs };
 }

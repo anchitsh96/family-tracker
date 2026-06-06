@@ -17,7 +17,8 @@ import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Screen } from '@/components/Screen';
-import { Money } from '@/components/Money';
+import { Money, MoneyUsd } from '@/components/Money';
+import { useFx } from '@/state/fx';
 import { TextInput } from '@/components/TextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { AccountRepository } from '@/storage/repositories/AccountRepository';
@@ -52,6 +53,10 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
     () => HoldingRepository.listByAccount(accountId),
     [accountId, dataVersion]
   );
+  // Live FX so USD totals/rows can re-convert at the current rate without
+  // a save/reload. Pulled at the screen level so all rows share the same
+  // value on a given render.
+  const usdInr = useFx((s) => s.usdInr);
 
   if (!account) {
     return (
@@ -64,7 +69,16 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
     );
   }
 
-  const total = holdings.reduce((s: number, h) => s + h.valueInr, 0);
+  const isUsdAccount = account.currency === 'USD';
+  // For a USD account the headline IS the dollar total, with an INR
+  // conversion underneath. For an INR account the headline is the
+  // existing rupee total — no behaviour change for the Indian accounts.
+  const totalUsd = isUsdAccount
+    ? holdings.reduce((s: number, h) => s + (h.valueNative ?? 0), 0)
+    : 0;
+  const total = isUsdAccount
+    ? totalUsd * usdInr
+    : holdings.reduce((s: number, h) => s + h.valueInr, 0);
 
   const deleteAccount = () => {
     Alert.alert(
@@ -117,7 +131,14 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
         <Text style={styles.sub}>
           {BUCKET_LABELS[account.bucket]} · {account.provider}
         </Text>
-        <Money value={total} style={styles.total} />
+        {isUsdAccount ? (
+          <>
+            <MoneyUsd value={totalUsd} style={styles.total} />
+            <Money value={total} compact style={styles.totalSecondary} />
+          </>
+        ) : (
+          <Money value={total} style={styles.total} />
+        )}
       </View>
 
       {/* The holdings list scrolls in the space below the header. */}
@@ -137,6 +158,7 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
         renderItem={({ item }) => (
           <SwipeableHoldingRow
             holding={item}
+            usdInr={usdInr}
             onUpdate={() => setUpdating(item)}
             onDelete={() => deleteHolding(item.id, item.instrumentName)}
           />
@@ -166,13 +188,16 @@ export function AccountDetailScreen({ accountId, onBack }: Props) {
 // every past valuation shows as a muted date + value sub-row.
 function SwipeableHoldingRow({
   holding,
+  usdInr,
   onUpdate,
   onDelete,
 }: {
   holding: Holding;
+  usdInr: number;
   onUpdate: () => void;
   onDelete: () => void;
 }) {
+  const isUsd = holding.nativeCurrency === 'USD' && holding.valueNative !== undefined;
   // Re-read history whenever this holding changes (updatedAt bumps on
   // every value update). The most recent entry IS the current value
   // shown in the main row, so the timeline below shows the prior ones.
@@ -227,7 +252,20 @@ function SwipeableHoldingRow({
               {holding.asOfDate}
             </Text>
           </View>
-          <Money value={holding.valueInr} compact style={styles.val} />
+          <View style={styles.valCol}>
+            {isUsd ? (
+              <>
+                <MoneyUsd value={holding.valueNative!} style={styles.val} />
+                <Money
+                  value={holding.valueNative! * usdInr}
+                  compact
+                  style={styles.valSecondary}
+                />
+              </>
+            ) : (
+              <Money value={holding.valueInr} compact style={styles.val} />
+            )}
+          </View>
         </View>
       </ReanimatedSwipeable>
 
@@ -238,7 +276,21 @@ function SwipeableHoldingRow({
               <View style={styles.historyRail} />
               <Text style={styles.historyDate}>{h.asOfDate}</Text>
               <View style={{ flex: 1 }} />
-              <Money value={h.valueInr} compact style={styles.historyVal} />
+              {h.nativeCurrency === 'USD' && h.valueNative !== undefined ? (
+                // Historical USD points: keep them in dollars (deterministic
+                // — the dollar amount is what the statement recorded), with
+                // a parenthetical live-INR underneath.
+                <View style={{ alignItems: 'flex-end' }}>
+                  <MoneyUsd value={h.valueNative} style={styles.historyVal} />
+                  <Money
+                    value={h.valueNative * usdInr}
+                    compact
+                    style={styles.historyValSecondary}
+                  />
+                </View>
+              ) : (
+                <Money value={h.valueInr} compact style={styles.historyVal} />
+              )}
             </View>
           ))}
         </View>
@@ -265,7 +317,11 @@ function UpdateValueModal({
   onDone: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [value, setValue] = useState(String(holding.valueInr));
+  const isUsd = holding.nativeCurrency === 'USD';
+  const usdInr = useFx((s) => s.usdInr);
+  const [value, setValue] = useState(
+    isUsd ? String(holding.valueNative ?? 0) : String(holding.valueInr)
+  );
   const [date, setDate] = useState(todayISO());
   const [error, setError] = useState<string | null>(null);
 
@@ -285,7 +341,21 @@ function UpdateValueModal({
       return;
     }
     Keyboard.dismiss();
-    HoldingRepository.updateValue(holding.id, parsed, date.trim());
+    if (isUsd) {
+      // For USD holdings we record the dollar amount as the source of
+      // truth; the rupee figure is just the live-converted snapshot for
+      // anyone querying by INR. The dashboard never reads the stored
+      // value_inr for USD points anyway — see netWorthHistory().
+      HoldingRepository.updateValue(
+        holding.id,
+        parsed * usdInr,
+        date.trim(),
+        parsed,
+        'USD'
+      );
+    } else {
+      HoldingRepository.updateValue(holding.id, parsed, date.trim());
+    }
     onDone();
   };
 
@@ -323,7 +393,7 @@ function UpdateValueModal({
             showsVerticalScrollIndicator={false}
           >
             <TextInput
-              label="New value (₹)"
+              label={isUsd ? 'New value ($)' : 'New value (₹)'}
               value={value}
               onChangeText={(t) => {
                 setValue(t);
@@ -354,7 +424,11 @@ function UpdateValueModal({
                   .map((h) => (
                     <View key={h.id} style={styles.histRow}>
                       <Text style={styles.histDate}>{h.asOfDate}</Text>
-                      <Money value={h.valueInr} compact style={styles.histVal} />
+                      {h.nativeCurrency === 'USD' && h.valueNative !== undefined ? (
+                        <MoneyUsd value={h.valueNative} style={styles.histVal} />
+                      ) : (
+                        <Money value={h.valueInr} compact style={styles.histVal} />
+                      )}
                     </View>
                   ))}
               </View>
@@ -387,6 +461,11 @@ const styles = StyleSheet.create({
   h1: { ...typography.h1, color: colors.textPrimary },
   sub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
   total: { ...typography.headline, color: colors.textPrimary, marginTop: spacing.md },
+  totalSecondary: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
 
   // Scrolling holdings list — fills the space between header and footer.
   list: { flex: 1 },
@@ -411,6 +490,19 @@ const styles = StyleSheet.create({
   name: { color: colors.textPrimary, fontSize: 15, fontWeight: '500' },
   meta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   val: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  valCol: { alignItems: 'flex-end' },
+  valSecondary: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  historyValSecondary: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 1,
+  },
   swipeActions: { flexDirection: 'row' },
   swipeAction: {
     width: 78,

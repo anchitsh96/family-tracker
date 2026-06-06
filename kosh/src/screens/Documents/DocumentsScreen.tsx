@@ -134,7 +134,10 @@ export function DocumentsScreen() {
   const pickAndParse = async () => {
     const res = await DocumentPicker.getDocumentAsync({
       type: [
+        // Modern xlsx (Zerodha, Groww, …)
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        // Legacy xls (INDmoney holdings report comes as CDFV2 binary xls)
+        'application/vnd.ms-excel',
         'text/csv',
         'application/pdf',
       ],
@@ -218,7 +221,7 @@ export function DocumentsScreen() {
 
   return (
     <Screen>
-      <Text style={styles.h1}>Documents</Text>
+      <Text style={styles.h1}>Upload</Text>
       <Text style={styles.sub}>
         Upload a holdings report. We detect the format, extract holdings on-device, and let
         you review before saving.
@@ -230,6 +233,7 @@ export function DocumentsScreen() {
         <Tip text="Groww → Mutual Funds report (XLSX)" />
         <Tip text="Fisdom / W by Groww PMS investor report (PDF)" />
         <Tip text="CDSL Consolidated Account Statement (PDF, password supported)" />
+        <Tip text="INDmoney US Stocks → Holdings Report (XLS)" />
       </View>
 
       <PrimaryButton

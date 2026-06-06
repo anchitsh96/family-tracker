@@ -1,0 +1,34 @@
+INDmoney Global (IFSC)
+Account Statement
+Statement Period: May 01, 2026 - May 31, 2026
+
+Account Number: ******1234
+DriveWealth, LLC
+
+Valuation Summary
+Beginning Portfolio Value $128.90
+Ending Portfolio Value $136.25
+
+Asset Allocation
+Cash $0.73
+Equities $135.52
+
+HOLDINGS
+Equity
+Description Symbol Quantity Unit Cost Total Cost Market Price Market Value Gain/(Loss) A/C Type
+APPLE INC AAPL 0.0789 186.42 14.71 201.57 15.90 1.19 CASH
+COINBASE GLOBAL INC COIN 0.0612 154.38 9.45 168.20 10.29 0.84 CASH
+ALPHABET INC CLASS A GOOGL 0.0701 142.05 9.96 159.34 11.17 1.21 CASH
+META PLATFORMS INC META 0.0245 487.30 11.94 521.66 12.78 0.84 CASH
+NVIDIA CORP NVDA 0.1318 118.62 15.63 132.41 17.45 1.82 CASH
+RIVIAN AUTOMOTIVE INC RIVN 1.2400 13.95 17.30 14.82 18.38 1.08 CASH
+TESLA INC TSLA 0.0834 218.40 18.21 234.12 19.53 1.32 CASH
+VANGUARD S&P 500 ETF VOO 0.0598 482.10 28.83 502.78 30.07 1.24 CASH
+
+MoneyMarket funds
+DRIVEWEALTH CASH SWEEP DWBDS 0.7300 1.00 0.73 1.00 0.73 0.00 CASH
+
+Total $136.25
+
+Disclosures
+This statement is for informational purposes only.

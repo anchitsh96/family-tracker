@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { Money } from '@/components/Money';
+import { Money, MoneyUsd } from '@/components/Money';
+import { useFx } from '@/state/fx';
 import { ExtractedAccountBundle, ParserSuccess } from '@/types/parser';
 import { colors } from '@/theme/colors';
 import { spacing, radius } from '@/theme/spacing';
@@ -27,9 +28,19 @@ export function ConfirmExtractedHoldings({ result, filename, onSaved, onCancel }
   const [busy, setBusy] = useState(false);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
+  const usdInr = useFx((s) => s.usdInr);
   const totalCount = result.bundles.reduce((s, b) => s + b.holdings.length, 0);
+  // INR-equivalent total across all bundles, converting USD bundles at
+  // the live FX rate. Used only for the header preview line.
   const totalValue = result.bundles.reduce(
-    (s, b) => s + b.holdings.reduce((s2, h) => s2 + h.valueInr, 0),
+    (s, b) =>
+      s +
+      b.holdings.reduce((s2, h) => {
+        if (h.nativeCurrency === 'USD' && h.valueNative !== undefined) {
+          return s2 + h.valueNative * usdInr;
+        }
+        return s2 + h.valueInr;
+      }, 0),
     0
   );
   const includedCount = totalCount - excluded.size;
@@ -63,6 +74,11 @@ export function ConfirmExtractedHoldings({ result, filename, onSaved, onCancel }
             quantity: h.quantity,
             unitPrice: h.unitPrice,
             valueInr: h.valueInr,
+            // Threaded through for USD holdings (INDmoney) so the repo
+            // records the dollar amount alongside the INR snapshot and
+            // can re-convert at the live rate when displayed.
+            valueNative: h.valueNative,
+            nativeCurrency: h.nativeCurrency,
             asOfDate: h.asOfDate,
             parserName: result.parser.name,
             parserVersion: result.parser.version,
@@ -158,6 +174,10 @@ function BundleSection({
   excluded: Set<string>;
   onToggle: (key: string) => void;
 }) {
+  const isUsdBundle = bundle.account.currency === 'USD';
+  const totalUsd = isUsdBundle
+    ? bundle.holdings.reduce((s, h) => s + (h.valueNative ?? 0), 0)
+    : 0;
   const total = bundle.holdings.reduce((s, h) => s + h.valueInr, 0);
   return (
     <View style={styles.bundle}>
@@ -169,11 +189,17 @@ function BundleSection({
             {BUCKET_LABELS[bundle.account.bucket]} · {bundle.holdings.length} holdings
           </Text>
         </View>
-        <Money value={total} compact style={styles.bundleTotal} />
+        {isUsdBundle ? (
+          <MoneyUsd value={totalUsd} style={styles.bundleTotal} />
+        ) : (
+          <Money value={total} compact style={styles.bundleTotal} />
+        )}
       </View>
       {bundle.holdings.map((h, idx) => {
         const key = `${bundle.account.nickname}#${idx}`;
         const isExcluded = excluded.has(key);
+        const rowIsUsd =
+          h.nativeCurrency === 'USD' && h.valueNative !== undefined;
         return (
           <Pressable
             key={key}
@@ -192,7 +218,11 @@ function BundleSection({
                 {h.unitPrice != null ? ` @ ${h.unitPrice.toFixed(2)}` : ''}
               </Text>
             </View>
-            <Money value={h.valueInr} compact style={styles.val} />
+            {rowIsUsd ? (
+              <MoneyUsd value={h.valueNative!} style={styles.val} />
+            ) : (
+              <Money value={h.valueInr} compact style={styles.val} />
+            )}
           </Pressable>
         );
       })}

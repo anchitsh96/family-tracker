@@ -98,4 +98,15 @@ FROM holdings h
 WHERE NOT EXISTS (SELECT 1 FROM holding_values hv WHERE hv.holding_id = h.id)
 `,
   },
+  {
+    // v3: native-currency tracking on the value-history rows. For an INR
+    // holding both columns stay NULL; for a USD holding (INDmoney /
+    // DriveWealth) we record the USD value at the point's date so the
+    // dashboard can re-convert it at the current FX rate every render.
+    version: 3,
+    sql: `
+ALTER TABLE holding_values ADD COLUMN value_native REAL;
+ALTER TABLE holding_values ADD COLUMN native_currency TEXT
+`,
+  },
 ];

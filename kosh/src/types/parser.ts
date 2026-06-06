@@ -23,6 +23,13 @@ export interface ExtractedHolding {
   quantity?: number;
   unitPrice?: number;
   valueInr: number;
+  // For non-INR holdings (US stocks via INDmoney/DriveWealth), the parser
+  // populates the native amount + currency. `valueInr` is the converted
+  // value at the time the parser ran; downstream code recomputes the live
+  // INR value from `valueNative` * current FX so a moving exchange rate
+  // refreshes the dashboard.
+  valueNative?: number;
+  nativeCurrency?: 'USD';
   asOfDate: string;
   rowMeta?: Record<string, string | number>;
 }

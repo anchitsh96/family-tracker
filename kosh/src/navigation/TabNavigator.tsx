@@ -80,6 +80,10 @@ export function TabNavigator() {
         name="Documents"
         component={DocumentsWithBar}
         options={{
+          // Keep the internal route name "Documents" stable so existing
+          // navigation refs don't have to change; only the user-visible
+          // tab label is renamed.
+          title: 'Upload',
           tabBarIcon: ({ color, focused }) => <TabIcon glyph="◰" color={color} focused={focused} />,
         }}
       />

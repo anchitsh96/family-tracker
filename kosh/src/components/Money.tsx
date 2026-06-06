@@ -31,6 +31,32 @@ export function formatINR(
   return `${sign}₹${grouped}${frac ? '.' + frac : ''}`;
 }
 
+// USD formatting. Same shape as formatINR but with US thousands grouping
+// (1,234.56 not 1,23,456) and a "$" prefix. Used in spots where we show
+// dollar values natively: the US Equity allocation row's secondary line
+// and the INDmoney account-detail view.
+export function formatUSD(
+  value: number,
+  opts: { compact?: boolean; decimals?: number } = {}
+): string {
+  const { compact = false, decimals = 2 } = opts;
+  if (!isFinite(value)) return '—';
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+
+  if (compact) {
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`;
+  }
+
+  const fixed = abs.toFixed(decimals);
+  const [whole, frac] = fixed.split('.');
+  const safeWhole = whole ?? '0';
+  // US grouping: every 3 digits from the right.
+  const grouped = safeWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${sign}$${grouped}${frac ? '.' + frac : ''}`;
+}
+
 // Standard Braille number cells (1-9, 0 -> a-j patterns). Each digit gets
 // a distinct dot pattern, so a masked figure reads as a number-shaped
 // Braille pattern — unreadable to a normal onlooker but still clearly
@@ -83,5 +109,24 @@ export function Money({ value, compact, decimals, signed, style }: MoneyProps) {
     <Text style={[typography.numeric, color ? { color } : null, style]}>
       {text}
     </Text>
+  );
+}
+
+// USD-denominated counterpart of <Money/>. Same privacy behaviour (the
+// Braille mask is currency-agnostic). Used where we deliberately want to
+// surface the native dollar amount alongside the INR figure.
+interface MoneyUsdProps {
+  value: number;
+  compact?: boolean;
+  decimals?: number;
+  style?: StyleProp<TextStyle>;
+}
+
+export function MoneyUsd({ value, compact, decimals = 2, style }: MoneyUsdProps) {
+  const hidden = usePrivacy((s) => s.hidden);
+  const raw = formatUSD(value, { compact, decimals });
+  const text = hidden ? maskDigits(raw) : raw;
+  return (
+    <Text style={[typography.numeric, style]}>{text}</Text>
   );
 }

@@ -60,6 +60,11 @@ export interface CreateHoldingInput {
   quantity?: number;
   unitPrice?: number;
   valueInr: number;
+  // For non-INR holdings the parser fills these. `valueInr` is the
+  // converted value at parse time; `valueNative` is what we re-convert
+  // live at display time when FX has moved.
+  valueNative?: number;
+  nativeCurrency?: 'USD';
   asOfDate: string;
   extras?: HoldingExtras;
   parserName?: string;
@@ -72,6 +77,8 @@ export interface HoldingValuePoint {
   id: string;
   holdingId: string;
   valueInr: number;
+  valueNative?: number;
+  nativeCurrency?: 'USD';
   asOfDate: string;
   createdAt: string;
 }
@@ -92,17 +99,30 @@ function normalizeForMatch(s: string): string {
 
 // Append a value-history row for a holding. Caller is responsible for the
 // surrounding transaction if atomicity with the holdings table is needed.
+// `valueNative`/`nativeCurrency` are nullable so INR holdings just leave
+// them empty; USD holdings record the dollar amount so we can re-convert
+// later as FX moves.
 function insertHoldingValue(
   db: ReturnType<typeof getDb>,
   holdingId: string,
   valueInr: number,
   asOfDate: string,
-  ts: string
+  ts: string,
+  valueNative?: number | null,
+  nativeCurrency?: string | null
 ) {
   db.executeSync(
-    `INSERT INTO holding_values (id, holding_id, value_inr, as_of_date, created_at)
-     VALUES (?, ?, ?, ?, ?);`,
-    [ulid(), holdingId, valueInr, asOfDate, ts]
+    `INSERT INTO holding_values (id, holding_id, value_inr, value_native, native_currency, as_of_date, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    [
+      ulid(),
+      holdingId,
+      valueInr,
+      valueNative ?? null,
+      nativeCurrency ?? null,
+      asOfDate,
+      ts,
+    ]
   );
 }
 
@@ -145,8 +165,8 @@ export const HoldingRepository = {
           input.quantity ?? null,
           input.unitPrice ?? null,
           input.valueInr,
-          null,
-          null,
+          input.valueNative ?? null,
+          input.nativeCurrency ?? null,
           input.asOfDate,
           input.extras ? JSON.stringify(input.extras) : null,
           input.parserName ?? null,
@@ -156,8 +176,18 @@ export const HoldingRepository = {
           ts,
         ]
       );
-      // Seed the value history with this initial valuation.
-      insertHoldingValue(db, id, input.valueInr, input.asOfDate, ts);
+      // Seed the value history with this initial valuation, including
+      // native amount so USD holdings can be re-converted at the current
+      // FX rate every time the dashboard renders.
+      insertHoldingValue(
+        db,
+        id,
+        input.valueInr,
+        input.asOfDate,
+        ts,
+        input.valueNative,
+        input.nativeCurrency
+      );
       db.executeSync('COMMIT;');
     } catch (err) {
       db.executeSync('ROLLBACK;');
@@ -171,7 +201,13 @@ export const HoldingRepository = {
   // point rather than stacking a duplicate. The denormalised current
   // value/date on the holdings row is recomputed as the latest by date,
   // so back-dating an old value never clobbers a newer "current".
-  updateValue(holdingId: string, valueInr: number, asOfDate: string) {
+  updateValue(
+    holdingId: string,
+    valueInr: number,
+    asOfDate: string,
+    valueNative?: number,
+    nativeCurrency?: 'USD'
+  ) {
     const db = getDb();
     const ts = now();
     db.executeSync('BEGIN;');
@@ -183,25 +219,47 @@ export const HoldingRepository = {
       const existingId = (existing.rows?.[0] as { id?: string } | undefined)?.id;
       if (existingId) {
         db.executeSync(
-          'UPDATE holding_values SET value_inr = ?, created_at = ? WHERE id = ?;',
-          [valueInr, ts, existingId]
+          'UPDATE holding_values SET value_inr = ?, value_native = ?, native_currency = ?, created_at = ? WHERE id = ?;',
+          [valueInr, valueNative ?? null, nativeCurrency ?? null, ts, existingId]
         );
       } else {
-        insertHoldingValue(db, holdingId, valueInr, asOfDate, ts);
+        insertHoldingValue(
+          db,
+          holdingId,
+          valueInr,
+          asOfDate,
+          ts,
+          valueNative,
+          nativeCurrency
+        );
       }
       // Recompute the denormalised current value = latest history point.
+      // We pull native columns alongside so the holdings row also reflects
+      // the latest USD (not just INR), keeping listByAccount() current.
       const latest = db.executeSync(
-        `SELECT value_inr, as_of_date FROM holding_values
+        `SELECT value_inr, value_native, native_currency, as_of_date FROM holding_values
          WHERE holding_id = ? ORDER BY as_of_date DESC, created_at DESC LIMIT 1;`,
         [holdingId]
       );
       const row = latest.rows?.[0] as
-        | { value_inr: number; as_of_date: string }
+        | {
+            value_inr: number;
+            value_native: number | null;
+            native_currency: string | null;
+            as_of_date: string;
+          }
         | undefined;
       if (row) {
         db.executeSync(
-          'UPDATE holdings SET value_inr = ?, as_of_date = ?, updated_at = ? WHERE id = ?;',
-          [row.value_inr, row.as_of_date, ts, holdingId]
+          'UPDATE holdings SET value_inr = ?, value_native = ?, native_currency = ?, as_of_date = ?, updated_at = ? WHERE id = ?;',
+          [
+            row.value_inr,
+            row.value_native,
+            row.native_currency,
+            row.as_of_date,
+            ts,
+            holdingId,
+          ]
         );
       }
       db.executeSync('COMMIT;');
@@ -243,8 +301,16 @@ export const HoldingRepository = {
         // Consume the match so a second incoming row can't re-match it.
         if (match.isin) byIsin.delete(match.isin.toUpperCase());
         byName.delete(normalizeForMatch(match.instrumentName));
-        this.updateValue(match.id, inc.valueInr, inc.asOfDate);
+        this.updateValue(
+          match.id,
+          inc.valueInr,
+          inc.asOfDate,
+          inc.valueNative,
+          inc.nativeCurrency
+        );
         // Refresh the holding's metadata to the latest statement's values.
+        // (updateValue has already refreshed value_inr / value_native /
+        // native_currency / as_of_date / updated_at on the holdings row.)
         db.executeSync(
           `UPDATE holdings SET instrument_name = ?, isin = ?, quantity = ?, unit_price = ?, extras_json = ?, parser_name = ?, parser_version = ?, source_document_id = ?, updated_at = ? WHERE id = ?;`,
           [
@@ -269,11 +335,13 @@ export const HoldingRepository = {
     return { updated, created };
   },
 
-  // Full value history for one holding, oldest first.
+  // Full value history for one holding, oldest first. Native fields are
+  // populated for USD points so the caller can re-convert at the current
+  // FX rate instead of relying on the historical INR-at-parse-time.
   valueHistory(holdingId: string): HoldingValuePoint[] {
     const db = getDb();
     const res = db.executeSync(
-      `SELECT id, holding_id, value_inr, as_of_date, created_at
+      `SELECT id, holding_id, value_inr, value_native, native_currency, as_of_date, created_at
        FROM holding_values WHERE holding_id = ?
        ORDER BY as_of_date ASC, created_at ASC;`,
       [holdingId]
@@ -283,6 +351,8 @@ export const HoldingRepository = {
         id: string;
         holding_id: string;
         value_inr: number;
+        value_native: number | null;
+        native_currency: string | null;
         as_of_date: string;
         created_at: string;
       };
@@ -290,6 +360,8 @@ export const HoldingRepository = {
         id: row.id,
         holdingId: row.holding_id,
         valueInr: row.value_inr,
+        valueNative: row.value_native ?? undefined,
+        nativeCurrency: (row.native_currency ?? undefined) as 'USD' | undefined,
         asOfDate: row.as_of_date,
         createdAt: row.created_at,
       };
@@ -300,10 +372,18 @@ export const HoldingRepository = {
   // valued. For each such date, net worth = sum over all holdings of that
   // holding's most-recent value at-or-before the date. Holdings that
   // didn't exist yet contribute nothing.
-  netWorthHistory(profileId: string): NetWorthPoint[] {
+  //
+  // `usdInr` is the CURRENT FX rate. When a history row has
+  // value_native + native_currency='USD' we re-convert that dollar amount
+  // to INR at the live rate — that way the whole chart (not just today's
+  // dot) reflects what the portfolio is worth NOW given current FX.
+  // This matches the user intent: "whenever I am looking at it, use the
+  // real-time data of dollars to rupees". If `usdInr` is omitted we fall
+  // back to the stored value_inr (parse-time conversion).
+  netWorthHistory(profileId: string, usdInr?: number): NetWorthPoint[] {
     const db = getDb();
     const res = db.executeSync(
-      `SELECT hv.holding_id, hv.value_inr, hv.as_of_date
+      `SELECT hv.holding_id, hv.value_inr, hv.value_native, hv.native_currency, hv.as_of_date
        FROM holding_values hv
        JOIN holdings h ON h.id = hv.holding_id
        JOIN accounts a ON a.id = h.account_id
@@ -314,6 +394,8 @@ export const HoldingRepository = {
     const rows = (res.rows ?? []) as unknown as {
       holding_id: string;
       value_inr: number;
+      value_native: number | null;
+      native_currency: string | null;
       as_of_date: string;
     }[];
     if (rows.length === 0) return [];
@@ -322,8 +404,15 @@ export const HoldingRepository = {
     const dateSet = new Set<string>();
     for (const r of rows) {
       dateSet.add(r.as_of_date);
+      // Convert USD points to INR at the LIVE rate, not parse-time.
+      const usable =
+        r.native_currency === 'USD' &&
+        r.value_native !== null &&
+        usdInr !== undefined
+          ? r.value_native * usdInr
+          : r.value_inr;
       const arr = byHolding.get(r.holding_id) ?? [];
-      arr.push({ date: r.as_of_date, value: r.value_inr });
+      arr.push({ date: r.as_of_date, value: usable });
       byHolding.set(r.holding_id, arr);
     }
     const dates = Array.from(dateSet).sort();
@@ -376,8 +465,8 @@ export const HoldingRepository = {
             h.quantity ?? null,
             h.unitPrice ?? null,
             h.valueInr,
-            null,
-            null,
+            h.valueNative ?? null,
+            h.nativeCurrency ?? null,
             h.asOfDate,
             h.extras ? JSON.stringify(h.extras) : null,
             h.parserName ?? null,
@@ -388,7 +477,15 @@ export const HoldingRepository = {
           ]
         );
         // Seed the value history for each replacement holding.
-        insertHoldingValue(db, id, h.valueInr, h.asOfDate, ts);
+        insertHoldingValue(
+          db,
+          id,
+          h.valueInr,
+          h.asOfDate,
+          ts,
+          h.valueNative,
+          h.nativeCurrency
+        );
       }
       db.executeSync('COMMIT;');
     } catch (err) {

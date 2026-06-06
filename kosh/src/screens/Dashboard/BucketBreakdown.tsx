@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Bucket, BUCKET_LABELS } from '@/types/account';
-import { Money, maskDigits } from '@/components/Money';
+import { Money, MoneyUsd, maskDigits } from '@/components/Money';
 import { usePrivacy } from '@/state/privacy';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
@@ -10,6 +10,11 @@ import { typography } from '@/theme/typography';
 interface Slice {
   bucket: Bucket;
   value: number;
+  // USD subtotal for buckets that hold native-USD positions (currently
+  // just equity_us). When present, the row renders a small "$X" line
+  // beneath the rupee figure to make explicit which buckets are
+  // FX-sensitive.
+  valueUsd?: number;
 }
 
 interface Props {
@@ -51,7 +56,12 @@ export function BucketBreakdown({ slices, total }: Props) {
         {sorted.map((s) => (
           <View key={s.bucket} style={styles.row}>
             <View style={[styles.dot, { backgroundColor: colors.bucket[s.bucket] }]} />
-            <Text style={styles.label}>{BUCKET_LABELS[s.bucket]}</Text>
+            <View style={styles.labelCol}>
+              <Text style={styles.label}>{BUCKET_LABELS[s.bucket]}</Text>
+              {s.valueUsd !== undefined && s.valueUsd > 0 && (
+                <MoneyUsd value={s.valueUsd} style={styles.nativeSubtotal} />
+              )}
+            </View>
             <View style={{ flex: 1 }} />
             <Money value={s.value} compact style={styles.value} />
             <Text style={styles.pct}>
@@ -85,7 +95,13 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   dot: { width: 10, height: 10, borderRadius: 5 },
+  labelCol: { flexShrink: 1 },
   label: { ...typography.body, color: colors.textPrimary },
+  nativeSubtotal: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   value: { ...typography.bodyStrong, color: colors.textPrimary },
   pct: {
     ...typography.caption,

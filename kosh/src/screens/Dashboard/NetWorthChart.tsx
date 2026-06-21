@@ -26,7 +26,12 @@ export interface PeriodDelta {
   label: string;
 }
 
-const PERIODS: Period[] = ['1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+// Visible period chips on the chart. '1W' is omitted intentionally — the
+// chart now plots one consolidated point per month-end (plus "today"),
+// so a one-week window is at most a single dot and has no useful delta.
+// The Period TYPE still includes '1W' for compatibility but it's never
+// surfaced to the user.
+const PERIODS: Period[] = ['1M', '3M', 'YTD', '1Y', 'ALL'];
 
 const PERIOD_LABEL: Record<Period, string> = {
   '1W': 'Past week',
@@ -39,44 +44,85 @@ const PERIOD_LABEL: Record<Period, string> = {
 
 const DAY = 86_400_000;
 
-export function filterByPeriod(points: NetWorthPoint[], period: Period): NetWorthPoint[] {
-  if (period === 'ALL' || points.length === 0) return points;
-  const now = Date.now();
-  let cutoff: number;
+// Cutoff timestamp for a given period, or null for "ALL". Centralised so
+// filterByPeriod (chart range) and computeDelta (delta baseline) stay in
+// sync.
+//
+// Semantics are MONTH-BOUNDARY based, matching the month-on-month chart:
+//   1M  → start of current month  → baseline = last month-end
+//   3M  → first day of (curMonth - 2) → baseline = 3 month-ends back
+//   1Y  → first day of (curMonth - 11) → baseline = 12 month-ends back
+//   YTD → Jan 1 of current year
+//   1W  → 7-day window (legacy; chip not shown to user anymore)
+function periodCutoff(period: Period): number | null {
+  if (period === 'ALL') return null;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
   switch (period) {
     case '1W':
-      cutoff = now - 7 * DAY;
-      break;
+      return Date.now() - 7 * DAY;
     case '1M':
-      cutoff = now - 30 * DAY;
-      break;
+      return new Date(y, m, 1).getTime();
     case '3M':
-      cutoff = now - 90 * DAY;
-      break;
+      return new Date(y, m - 2, 1).getTime();
     case '1Y':
-      cutoff = now - 365 * DAY;
-      break;
+      return new Date(y, m - 11, 1).getTime();
     case 'YTD':
-      cutoff = new Date(new Date().getFullYear(), 0, 1).getTime();
-      break;
+      return new Date(y, 0, 1).getTime();
     default:
-      cutoff = 0;
+      return 0;
   }
+}
+
+export function filterByPeriod(points: NetWorthPoint[], period: Period): NetWorthPoint[] {
+  const cutoff = periodCutoff(period);
+  if (cutoff === null || points.length === 0) return points;
   return points.filter((p) => {
     const t = new Date(p.date).getTime();
-    return isFinite(t) && t >= cutoff;
+    return Number.isFinite(t) && t >= cutoff;
   });
 }
 
+// Net-worth change over the selected period.
+//
+// Baseline = the latest history point AT OR BEFORE the cutoff in the
+// FULL history (not the filtered window). For "1M" that's the value as
+// of one month ago — i.e. the last statement before the lookback
+// boundary. This matches what a bank shows as "% change this month".
+//
+// If no point is that old (you only started tracking recently), we fall
+// back to the very first point — the delta then reads "since you started"
+// which is the most honest answer.
+//
+// `allPoints` MUST be the full unfiltered history. Passing a filtered
+// window was the previous bug — when the only old statement got
+// filtered out, baseline collapsed to a recent point and the delta
+// reported ~0.
 export function computeDelta(
-  points: NetWorthPoint[],
+  allPoints: NetWorthPoint[],
   period: Period
 ): PeriodDelta | null {
-  if (points.length < 2) return null;
-  const first = points[0]!.value;
-  const last = points[points.length - 1]!.value;
-  const value = last - first;
-  const percent = first !== 0 ? (value / first) * 100 : 0;
+  if (allPoints.length < 2) return null;
+  const last = allPoints[allPoints.length - 1]!.value;
+  const cutoff = periodCutoff(period);
+
+  let baseline: number;
+  if (cutoff === null) {
+    baseline = allPoints[0]!.value;
+  } else {
+    // Walk forward; the last point with t <= cutoff is the baseline.
+    let baseIdx = -1;
+    for (let i = 0; i < allPoints.length; i++) {
+      const t = new Date(allPoints[i]!.date).getTime();
+      if (Number.isFinite(t) && t <= cutoff) baseIdx = i;
+      else if (Number.isFinite(t) && t > cutoff) break;
+    }
+    baseline = baseIdx >= 0 ? allPoints[baseIdx]!.value : allPoints[0]!.value;
+  }
+
+  const value = last - baseline;
+  const percent = baseline !== 0 ? (value / baseline) * 100 : 0;
   return { value, percent, label: PERIOD_LABEL[period] };
 }
 

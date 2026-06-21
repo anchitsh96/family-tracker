@@ -23,13 +23,20 @@ import {
   isBiometricEnabled,
 } from '@/crypto/keystore';
 import { createBackup } from '@/crypto/backup';
+import {
+  exportProfile,
+  importIntoProfile,
+  previewExport,
+} from '@/crypto/profileSync';
 import { evaluateStrength, isPassphraseAcceptable } from '@/crypto/passphrase';
 
 export function SettingsScreen() {
   const setStatus = useAuth((s) => s.setStatus);
   const setActive = useActiveProfile((s) => s.setActive);
   const activeId = useActiveProfile((s) => s.activeProfileId);
+  const bumpData = useActiveProfile((s) => s.bump);
   const profiles = activeId ? ProfileRepository.list() : [];
+  const activeProfile = activeId ? ProfileRepository.get(activeId) : null;
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [showPassphraseChange, setShowPassphraseChange] = useState(false);
@@ -117,6 +124,99 @@ export function SettingsScreen() {
     });
   };
 
+  // Per-profile share: produce a single-profile encrypted .kosh file and
+  // open the share sheet. Use case: Anchit shares the "Dad" profile with
+  // Dad's Android device every month. The receiver imports via the
+  // matching "Import profile data" action below.
+  const shareActiveProfile = () => {
+    if (!activeProfile) {
+      Alert.alert('No active profile');
+      return;
+    }
+    Alert.prompt(
+      'Encrypt with passphrase',
+      `The file will be encrypted with this passphrase. The receiver needs the same passphrase to import. For Dad's device, use the passphrase you set on his app.`,
+      async (p?: string) => {
+        if (!p) return;
+        try {
+          const { path, filename } = await exportProfile(activeProfile.id, p);
+          const ok = await Sharing.isAvailableAsync();
+          if (ok) {
+            await Sharing.shareAsync(path, {
+              dialogTitle: filename,
+              UTI: 'public.data',
+            });
+          } else {
+            Alert.alert('Export ready', `Saved to: ${path}`);
+          }
+        } catch (e: any) {
+          Alert.alert('Export failed', e?.message ?? 'unknown error');
+        }
+      },
+      'secure-text'
+    );
+  };
+
+  // Per-profile import: pick a .kosh file, enter the sender's passphrase,
+  // preview the snapshot, confirm, atomically replace the active
+  // profile's data. Local profile row (name, color) stays the same.
+  const importProfileFile = async () => {
+    if (!activeProfile) {
+      Alert.alert('No active profile');
+      return;
+    }
+    const res = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (res.canceled) return;
+    const file = res.assets?.[0];
+    if (!file) return;
+    Alert.prompt(
+      'File passphrase',
+      'Enter the passphrase the sender used when exporting the file.',
+      async (p?: string) => {
+        if (!p) return;
+        try {
+          const preview = await previewExport(file.uri, p);
+          Alert.alert(
+            'Replace local data?',
+            `Replace your "${activeProfile.displayName}" data with the snapshot of "${preview.sourceProfileName}" (${preview.accountCount} accounts · ${preview.holdingCount} holdings)? Your current data will be overwritten.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Replace',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    const result = await importIntoProfile(
+                      file.uri,
+                      p,
+                      activeProfile.id
+                    );
+                    bumpData();
+                    Alert.alert(
+                      'Import complete',
+                      `${result.importedAccountCount} accounts · ${result.importedHoldingCount} holdings.`
+                    );
+                  } catch (e: any) {
+                    Alert.alert(
+                      'Import failed',
+                      e?.message ?? 'unknown error'
+                    );
+                  }
+                },
+              },
+            ]
+          );
+        } catch (e: any) {
+          Alert.alert('Could not read file', e?.message ?? 'unknown error');
+        }
+      },
+      'secure-text'
+    );
+  };
+
   const restoreBackup = async () => {
     Alert.alert(
       'Restore?',
@@ -181,6 +281,26 @@ export function SettingsScreen() {
         </Pressable>
         <Pressable style={styles.action} onPress={restoreBackup}>
           <Text style={styles.actionTxt}>Restore from file</Text>
+          <Text style={styles.chev}>›</Text>
+        </Pressable>
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Sync with another device</Text>
+        <Text style={styles.sectionHint}>
+          Send the active profile to another Kosh install as an encrypted
+          file. The receiver imports it; their copy of the profile is
+          overwritten. Nothing leaves the device except via the share
+          sheet — no cloud relay.
+        </Text>
+        <Pressable style={styles.action} onPress={shareActiveProfile}>
+          <Text style={styles.actionTxt}>
+            Share "{activeProfile?.displayName ?? '...'}" data
+          </Text>
+          <Text style={styles.chev}>›</Text>
+        </Pressable>
+        <Pressable style={styles.action} onPress={importProfileFile}>
+          <Text style={styles.actionTxt}>Import profile data</Text>
           <Text style={styles.chev}>›</Text>
         </Pressable>
       </Card>
@@ -269,6 +389,7 @@ function ChangePassphraseInline() {
 const styles = StyleSheet.create({
   h1: { ...typography.h1, color: colors.textPrimary, marginBottom: spacing.md },
   sectionTitle: { ...typography.caption, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: spacing.sm },
+  sectionHint: { color: colors.textMuted, fontSize: 12, marginBottom: spacing.sm, lineHeight: 17 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
   rowLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '500' },
   rowHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },

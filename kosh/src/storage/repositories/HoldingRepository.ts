@@ -89,6 +89,32 @@ export interface NetWorthPoint {
   value: number;
 }
 
+// Return the list of YYYY-MM-DD last-day-of-month sample dates from
+// firstIso's month through (lastIso's month - 1). Used by month-on-month
+// resampling — the caller appends "today" as the final sample, so this
+// helper stops one month short of lastIso.
+function monthEndsBetween(firstIso: string, lastIso: string): string[] {
+  const [fy, fm] = firstIso.split('-').map(Number) as [number, number, number];
+  const [ly, lm] = lastIso.split('-').map(Number) as [number, number, number];
+  if (!fy || !fm || !ly || !lm) return [];
+  const out: string[] = [];
+  let y = fy;
+  let m = fm;
+  // While (y,m) is strictly before (ly,lm), emit last-day-of-month.
+  while (y < ly || (y === ly && m < lm)) {
+    const lastDay = new Date(y, m, 0).getDate(); // day 0 of next month = last day of this
+    out.push(
+      `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+    );
+    m += 1;
+    if (m > 12) {
+      y += 1;
+      m = 1;
+    }
+  }
+  return out;
+}
+
 // Normalise an instrument name for fuzzy matching across statement
 // re-uploads — uppercase, drop everything that isn't alphanumeric. So
 // "Axis Arbitrage Direct-G" and "AXIS ARBITRAGE DIRECT - G" both become
@@ -430,6 +456,62 @@ export const HoldingRepository = {
       }
       return { date: d, value: Math.round(total * 100) / 100 };
     });
+  },
+
+  // Consolidated month-on-month view of net worth.
+  //
+  // Returns one point per calendar month from the user's earliest data
+  // through the current month, with:
+  //   - past months  → date = last day of month, value = consolidated
+  //                     total at that month-end (across all accounts,
+  //                     re-converting USD at the current FX rate)
+  //   - current month → date = today, value = current total
+  //
+  // This is the right granularity for "how is my portfolio doing
+  // month-on-month" — drops the noise of every individual statement
+  // upload date becoming a chart dot and aligns the X-axis with the
+  // user's actual upload cadence (monthly statements). Internally it
+  // resamples the fine-grained `netWorthHistory` output at month
+  // boundaries — same source of truth, no new table.
+  monthEndHistory(profileId: string, usdInr?: number): NetWorthPoint[] {
+    const fine = this.netWorthHistory(profileId, usdInr);
+    if (fine.length === 0) return [];
+
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const firstIso = fine[0]!.date;
+
+    // Build the list of sample dates: last day of each month from the
+    // first month with data through the previous month, then today as
+    // the final sample. (For the current month we want "right now",
+    // not a future date.)
+    const samples = monthEndsBetween(firstIso, todayIso);
+    if (samples.length === 0) {
+      // First data is in the current month — only "today" makes sense.
+      samples.push(todayIso);
+    } else if (samples[samples.length - 1]! < todayIso) {
+      // Append today as the final point so the user sees current value.
+      samples.push(todayIso);
+    } else {
+      // Final sample equals current month-end (or later). Replace with
+      // today so the rightmost dot reads as "now".
+      samples[samples.length - 1] = todayIso;
+    }
+
+    // Walk both ascending arrays in lock-step. For each sample, the
+    // value is the latest fine point with date <= sample.
+    const out: NetWorthPoint[] = [];
+    let i = 0;
+    let lastValue: number | null = null;
+    for (const s of samples) {
+      while (i < fine.length && fine[i]!.date <= s) {
+        lastValue = fine[i]!.value;
+        i++;
+      }
+      if (lastValue !== null) {
+        out.push({ date: s, value: lastValue });
+      }
+    }
+    return out;
   },
 
   get(id: string): Holding | null {

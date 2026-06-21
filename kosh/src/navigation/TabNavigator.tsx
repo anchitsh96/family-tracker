@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { DashboardScreen } from '@/screens/Dashboard/DashboardScreen';
@@ -76,17 +76,27 @@ export function TabNavigator() {
           tabBarIcon: ({ color, focused }) => <TabIcon glyph="◫" color={color} focused={focused} />,
         }}
       />
-      <Tab.Screen
-        name="Documents"
-        component={DocumentsWithBar}
-        options={{
-          // Keep the internal route name "Documents" stable so existing
-          // navigation refs don't have to change; only the user-visible
-          // tab label is renamed.
-          title: 'Upload',
-          tabBarIcon: ({ color, focused }) => <TabIcon glyph="◰" color={color} focused={focused} />,
-        }}
-      />
+      {/* Upload tab is iOS-only. The Android build ships to Dad as a
+          receive-only viewer: he never uploads statements, so the
+          parser pipeline (and the iOS-only KoshPdfText PDFKit/Vision
+          native module behind it) is irrelevant. He gets fresh data
+          via Settings → Sync → Import profile data, which works on
+          both platforms. If Anchit ever runs the Android build for
+          himself, this restriction is the only thing missing — revisit
+          then. */}
+      {Platform.OS === 'ios' && (
+        <Tab.Screen
+          name="Documents"
+          component={DocumentsWithBar}
+          options={{
+            // Keep the internal route name "Documents" stable so existing
+            // navigation refs don't have to change; only the user-visible
+            // tab label is renamed.
+            title: 'Upload',
+            tabBarIcon: ({ color, focused }) => <TabIcon glyph="◰" color={color} focused={focused} />,
+          }}
+        />
+      )}
       <Tab.Screen
         name="Settings"
         component={SettingsWithBar}

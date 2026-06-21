@@ -8,6 +8,7 @@ import { Screen } from '@/components/Screen';
 import { Card } from '@/components/Card';
 import { TextInput } from '@/components/TextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { usePassphrasePrompt } from '@/components/PassphrasePrompt';
 import { colors } from '@/theme/colors';
 import { spacing, radius } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -40,6 +41,10 @@ export function SettingsScreen() {
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [showPassphraseChange, setShowPassphraseChange] = useState(false);
+  // Cross-platform passphrase prompt. Alert.prompt is iOS-only — Android
+  // silently degrades to a button-only dialog, which would break the
+  // whole sync flow on Dad's device.
+  const [passphrasePromptEl, passphrasePromptHandle] = usePassphrasePrompt();
 
   useEffect(() => {
     isBiometricEnabled().then(setBioEnabled);
@@ -111,50 +116,55 @@ export function SettingsScreen() {
   };
 
   const exportBackup = async () => {
-    Alert.prompt('Backup passphrase', 'Use the same passphrase as this app for now.', async (p?: string) => {
-      if (!p) return;
-      try {
-        const { path, filename } = await createBackup(p);
-        const ok = await Sharing.isAvailableAsync();
-        if (ok) await Sharing.shareAsync(path, { dialogTitle: filename, UTI: 'public.data' });
-        else Alert.alert('Backup ready', `Saved to: ${path}`);
-      } catch (e: any) {
-        Alert.alert('Backup failed', e?.message ?? 'unknown error');
-      }
+    const p = await passphrasePromptHandle.ask({
+      title: 'Backup passphrase',
+      message: 'Use the same passphrase as this app for now.',
+      submitLabel: 'Create backup',
     });
+    if (!p) return;
+    try {
+      const { path, filename } = await createBackup(p);
+      const ok = await Sharing.isAvailableAsync();
+      if (ok)
+        await Sharing.shareAsync(path, {
+          dialogTitle: filename,
+          UTI: 'public.data',
+        });
+      else Alert.alert('Backup ready', `Saved to: ${path}`);
+    } catch (e: any) {
+      Alert.alert('Backup failed', e?.message ?? 'unknown error');
+    }
   };
 
   // Per-profile share: produce a single-profile encrypted .kosh file and
   // open the share sheet. Use case: Anchit shares the "Dad" profile with
   // Dad's Android device every month. The receiver imports via the
   // matching "Import profile data" action below.
-  const shareActiveProfile = () => {
+  const shareActiveProfile = async () => {
     if (!activeProfile) {
       Alert.alert('No active profile');
       return;
     }
-    Alert.prompt(
-      'Encrypt with passphrase',
-      `The file will be encrypted with this passphrase. The receiver needs the same passphrase to import. For Dad's device, use the passphrase you set on his app.`,
-      async (p?: string) => {
-        if (!p) return;
-        try {
-          const { path, filename } = await exportProfile(activeProfile.id, p);
-          const ok = await Sharing.isAvailableAsync();
-          if (ok) {
-            await Sharing.shareAsync(path, {
-              dialogTitle: filename,
-              UTI: 'public.data',
-            });
-          } else {
-            Alert.alert('Export ready', `Saved to: ${path}`);
-          }
-        } catch (e: any) {
-          Alert.alert('Export failed', e?.message ?? 'unknown error');
-        }
-      },
-      'secure-text'
-    );
+    const p = await passphrasePromptHandle.ask({
+      title: 'Encrypt with passphrase',
+      message: `The file will be encrypted with this passphrase. The receiver needs the same passphrase to import. For Dad's device, use the passphrase you set on his app.`,
+      submitLabel: 'Encrypt & share',
+    });
+    if (!p) return;
+    try {
+      const { path, filename } = await exportProfile(activeProfile.id, p);
+      const ok = await Sharing.isAvailableAsync();
+      if (ok) {
+        await Sharing.shareAsync(path, {
+          dialogTitle: filename,
+          UTI: 'public.data',
+        });
+      } else {
+        Alert.alert('Export ready', `Saved to: ${path}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Export failed', e?.message ?? 'unknown error');
+    }
   };
 
   // Per-profile import: pick a .kosh file, enter the sender's passphrase,
@@ -172,49 +182,44 @@ export function SettingsScreen() {
     if (res.canceled) return;
     const file = res.assets?.[0];
     if (!file) return;
-    Alert.prompt(
-      'File passphrase',
-      'Enter the passphrase the sender used when exporting the file.',
-      async (p?: string) => {
-        if (!p) return;
-        try {
-          const preview = await previewExport(file.uri, p);
-          Alert.alert(
-            'Replace local data?',
-            `Replace your "${activeProfile.displayName}" data with the snapshot of "${preview.sourceProfileName}" (${preview.accountCount} accounts · ${preview.holdingCount} holdings)? Your current data will be overwritten.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Replace',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    const result = await importIntoProfile(
-                      file.uri,
-                      p,
-                      activeProfile.id
-                    );
-                    bumpData();
-                    Alert.alert(
-                      'Import complete',
-                      `${result.importedAccountCount} accounts · ${result.importedHoldingCount} holdings.`
-                    );
-                  } catch (e: any) {
-                    Alert.alert(
-                      'Import failed',
-                      e?.message ?? 'unknown error'
-                    );
-                  }
-                },
-              },
-            ]
-          );
-        } catch (e: any) {
-          Alert.alert('Could not read file', e?.message ?? 'unknown error');
-        }
-      },
-      'secure-text'
-    );
+    const p = await passphrasePromptHandle.ask({
+      title: 'File passphrase',
+      message: 'Enter the passphrase the sender used when exporting the file.',
+      submitLabel: 'Preview',
+    });
+    if (!p) return;
+    try {
+      const preview = await previewExport(file.uri, p);
+      Alert.alert(
+        'Replace local data?',
+        `Replace your "${activeProfile.displayName}" data with the snapshot of "${preview.sourceProfileName}" (${preview.accountCount} accounts · ${preview.holdingCount} holdings)? Your current data will be overwritten.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Replace',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const result = await importIntoProfile(
+                  file.uri,
+                  p,
+                  activeProfile.id
+                );
+                bumpData();
+                Alert.alert(
+                  'Import complete',
+                  `${result.importedAccountCount} accounts · ${result.importedHoldingCount} holdings.`
+                );
+              } catch (e: any) {
+                Alert.alert('Import failed', e?.message ?? 'unknown error');
+              }
+            },
+          },
+        ]
+      );
+    } catch (e: any) {
+      Alert.alert('Could not read file', e?.message ?? 'unknown error');
+    }
   };
 
   const restoreBackup = async () => {
@@ -329,6 +334,10 @@ export function SettingsScreen() {
           <Text style={[styles.actionTxt, { color: colors.negative }]}>Erase all data</Text>
         </Pressable>
       </Card>
+
+      {/* Cross-platform passphrase modal — only renders when an `ask`
+          call is pending. */}
+      {passphrasePromptEl}
     </Screen>
   );
 }

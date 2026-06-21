@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, Platform } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { Money, MoneyUsd } from '@/components/Money';
 import { useFx } from '@/state/fx';
@@ -97,8 +97,9 @@ export function AccountsListScreen({ onAdd, onPickAccount }: Props) {
         <View style={styles.empty}>
           <Text style={styles.emptyH}>No holdings yet</Text>
           <Text style={styles.emptyP}>
-            Tap "+ Add" to enter your first one, or use the Documents tab to upload a Zerodha or
-            Groww file.
+            {Platform.OS === 'ios'
+              ? 'Tap "+ Add" to enter your first one, or use the Upload tab to upload a Zerodha or Groww file.'
+              : 'Open Settings → Sync with another device → Import profile data to load a snapshot sent to you.'}
           </Text>
         </View>
       ) : (

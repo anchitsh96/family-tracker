@@ -6,7 +6,6 @@ import {
   NetWorthChart,
   NetWorthPoint,
   Period,
-  filterByPeriod,
   computeDelta,
 } from './NetWorthChart';
 import { BucketBreakdown } from './BucketBreakdown';
@@ -27,7 +26,10 @@ export function DashboardScreen() {
   // the rate updates (cache miss, manual refresh). Treat the rate as a
   // proper input — recompute everything when it changes.
   const usdInr = useFx((s) => s.usdInr);
-  const [period, setPeriod] = useState<Period>('ALL');
+  // Default to past-month: this is the comparison the user actually
+  // cares about ("how did I do this month"). 'ALL' is still available
+  // via the period selector for the longer view.
+  const [period, setPeriod] = useState<Period>('1M');
   const [data, setData] = useState<{
     profileName: string;
     accentColor: string;
@@ -78,12 +80,13 @@ export function DashboardScreen() {
       if (!latestDate || h.asOfDate > latestDate) latestDate = h.asOfDate;
     }
 
-    // The net-worth-over-time chart is reconstructed from each holding's
-    // value history (see HoldingRepository.netWorthHistory) — every time a
-    // holding is added or re-valued, a new point appears. Passing the
-    // live FX lets the repo re-convert USD points so the whole chart
-    // moves with the rate.
-    const history = HoldingRepository.netWorthHistory(activeId, usdInr);
+    // Month-on-month consolidated view: one dot per past month-end plus
+    // a final "today" dot for the current value. Smoother than the raw
+    // per-statement history (which dotted the chart at every upload
+    // date), and the X-axis aligns with the user's monthly statement
+    // cadence. USD points are re-converted at the live FX rate inside
+    // the repo so the whole chart moves with the rate.
+    const history = HoldingRepository.monthEndHistory(activeId, usdInr);
 
     setData({
       profileName: profile.displayName,
@@ -99,14 +102,16 @@ export function DashboardScreen() {
     });
   }, [activeId, dataVersion, usdInr]);
 
-  // Delta for the currently-selected period, derived from the history
-  // filtered to that window.
+  // Headline trend is intentionally PINNED to "Past month" regardless of
+  // which period chip is selected on the chart. The chart's period
+  // selector changes only the chart's X-axis range; the trend pill is a
+  // fixed month-on-month reading so it stays meaningful no matter how
+  // the user is browsing the graph below.
   const delta = useMemo(() => {
     if (!data) return null;
-    const windowed = filterByPeriod(data.history, period);
-    const d = computeDelta(windowed, period);
+    const d = computeDelta(data.history, '1M');
     return d ? { value: d.value, percent: d.percent, period: d.label } : null;
-  }, [data, period]);
+  }, [data]);
 
   if (!data) return <Screen />;
 
